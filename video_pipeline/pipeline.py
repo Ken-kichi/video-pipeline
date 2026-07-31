@@ -3,12 +3,15 @@
 流れ:
   1. 台本エージェント: 記事 -> 台本（生成→評価→修正ループ）
   2. スライドエージェント: 記事+台本 -> スライド内容（生成→評価→修正ループ）
+     ※各スライドには任意でimage_prompt（挿絵用、数値・文字は描かせない）が付く
   3. VOICEVOXテキストエージェント: 台本 -> 読み上げ用テキスト（生成→評価→修正ループ）
   4. 総合エージェント: 3つの整合性を採点し、90点未満なら該当箇所を修正して再採点
      （他の3エージェントと同じくSCORE_THRESHOLD/MAX_REVISION_LOOPSに従う）
   5. 概要欄エージェント: 確定した台本 -> 概要文・目次・元記事リンク・ハッシュタグ
      （生成→評価→修正ループ）
-  6. 台本(.md)・VOICEVOXテキスト(.txt)・スライド(.pptx)・概要欄(.txt)をファイルに保存する
+  6. (任意) image_promptが設定されているスライドについて、Gemini(Nano Banana系)で
+     挿絵を生成する（GENERATE_SLIDE_IMAGES有効時のみ。失敗しても処理は継続する）
+  7. 台本(.md)・VOICEVOXテキスト(.txt)・スライド(.pptx)・概要欄(.txt)をファイルに保存する
 """
 
 from pathlib import Path
@@ -20,7 +23,8 @@ from video_pipeline.agents import (
     slides_agent,
     voicevox_agent,
 )
-from video_pipeline.config import MAX_REVISION_LOOPS, SCORE_THRESHOLD
+from video_pipeline.config import GENERATE_SLIDE_IMAGES, MAX_REVISION_LOOPS, SCORE_THRESHOLD
+from video_pipeline.image_generator import generate_slide_image
 from video_pipeline.io_utils import read_markdown, write_text_file
 from video_pipeline.pptx_builder import build_pptx
 
@@ -82,14 +86,33 @@ def _run_integration_loop(
     return script, slides, voicevox_text, best_score, history
 
 
+def _generate_slide_images(slides: list[dict], images_dir: Path) -> list[dict]:
+    """image_promptが設定されているスライドについて挿絵を生成し、image_pathを追加する。
+
+    生成に失敗したスライドはimage_pathを付けずそのまま返す(pptx_builder側で
+    画像なし＝箇条書きのみのレイアウトにフォールバックする)。
+    """
+    for i, slide_data in enumerate(slides):
+        prompt = slide_data.get("image_prompt", "")
+        if not prompt:
+            continue
+        print(f"  スライド{i + 1}の挿絵を生成中: {prompt[:40]}...")
+        image_path = generate_slide_image(prompt, images_dir / f"slide_{i + 1}.png")
+        if image_path:
+            slide_data["image_path"] = str(image_path)
+    return slides
+
+
 def run_pipeline(
     article_path: str,
     output_dir: str = "output",
     video_title: str = "解説動画",
     article_url: str | None = None,
+    generate_images: bool | None = None,
 ) -> dict:
     article_text = read_markdown(article_path)
     article_url = article_url or DEFAULT_ARTICLE_URL_PLACEHOLDER
+    generate_images = GENERATE_SLIDE_IMAGES if generate_images is None else generate_images
 
     print("=== 台本エージェント ===")
     script, script_score, _ = script_agent.run(article_text)
@@ -109,6 +132,11 @@ def run_pipeline(
     description, description_score, _ = description_agent.run(script, article_url)
 
     output_dir_path = Path(output_dir)
+
+    if generate_images:
+        print("=== スライド挿絵の生成（Gemini） ===")
+        slides = _generate_slide_images(slides, output_dir_path / "images")
+
     script_path = write_text_file(output_dir_path / "script.md", script)
     voicevox_path = write_text_file(output_dir_path / "voicevox_script.txt", voicevox_text)
     description_path = write_text_file(output_dir_path / "description.txt", description)

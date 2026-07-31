@@ -21,3 +21,13 @@ SCORE_THRESHOLD = 90
 
 # 応答の最大トークン数（台本・スライド内容など長文生成用）
 MAX_TOKENS = 4096
+
+# スライドの挿絵をGemini(Nano Banana系)で生成するかどうか。
+# 別APIの課金が発生するため、デフォルトはオフ。CLIの --generate-images か
+# 環境変数 GENERATE_SLIDE_IMAGES=1 で有効化する。
+GENERATE_SLIDE_IMAGES = os.environ.get("GENERATE_SLIDE_IMAGES", "0") == "1"
+
+# 使用するGemini画像生成モデル。
+# gemini-2.5-flash-image / gemini-3.1-flash-image-preview(Nano Banana 2, 安価) /
+# gemini-3-pro-image-preview(Nano Banana Pro, 高品質・文字精度が高いが高価)
+GEMINI_IMAGE_MODEL = os.environ.get("GEMINI_IMAGE_MODEL", "gemini-3.1-flash-image-preview")

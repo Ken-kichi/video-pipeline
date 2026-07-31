@@ -26,9 +26,16 @@ def main() -> None:
         default=None,
         help="概要欄に貼る元記事(Zenn/note等)のURL。未指定ならプレースホルダーを挿入",
     )
+    parser.add_argument(
+        "--generate-images",
+        action="store_true",
+        default=None,
+        help="Gemini(GEMINI_API_KEY必須)でスライドの挿絵を生成する。省略時は環境変数"
+        "GENERATE_SLIDE_IMAGESの設定に従う（デフォルトはオフ）",
+    )
     args = parser.parse_args()
 
-    run_pipeline(args.input, args.output_dir, args.title, args.article_url)
+    run_pipeline(args.input, args.output_dir, args.title, args.article_url, args.generate_images)
 
 
 if __name__ == "__main__":
