@@ -80,7 +80,7 @@ video_pipeline/
 ├── image_generator.py    # Gemini(Nano Banana系)によるスライド挿絵生成
 ├── io_utils.py            # ファイル入出力
 ├── loop.py                # 生成→評価→修正ループの共通ロジック
-├── slide_image_builder.py # スライド内容(JSON) + 挿絵 -> PNG画像(Pillowで直接描画)
+├── slide_image_builder.py # スライド内容(JSON、4レイアウト対応) -> PNG画像(Pillowで直接描画)
 ├── assets/fonts/          # Noto Sans JP(同梱フォント。OS依存を避けるため)
 ├── pipeline.py            # 全体のオーケストレーション
 ├── main.py                # CLIエントリーポイント
@@ -128,7 +128,8 @@ Gemini APIで実際の画像を生成して`output/<実行時刻>/images/`に保
 - 以前は`python-pptx`で`.pptx`を組み立てていたが、Mac上のPowerPointで開けない
   事例があったため、直接PNG画像を書き出す方式(`slide_image_builder.py`)に
   変更した。日本語フォントはOS依存を避けるためNoto Sans JPを同梱している
-- スライドのデザインは固定のシンプルなレイアウト（タイトル+箇条書き+任意の挿絵）。
+- スライドはNotebookLMのVideo Overviewを参考に、内容に応じて4種類のレイアウト
+  （箇条書き/数値強調/引用/比較）を`slides_agent`が選んで生成する。
   配色やフォントサイズを変えたい場合は`slide_image_builder.py`の定数を編集する
 - 概要欄エージェントは総合エージェントの整合性チェック対象には含めていない
   （確定した台本だけを見て作るため、台本と概要欄の食い違いはチェックされるが、
