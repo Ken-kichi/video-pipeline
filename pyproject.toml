@@ -9,10 +9,12 @@ dependencies = [
     "google-genai>=2.16.0",
     "pillow>=12.3.0",
     "python-dotenv>=1.2.2",
+    "requests>=2.34.2",
 ]
 
 [project.scripts]
 video-pipeline = "video_pipeline.main:main"
+voicevox-synthesize = "video_pipeline.synthesize_audio:main"
 
 [build-system]
 requires = ["hatchling"]

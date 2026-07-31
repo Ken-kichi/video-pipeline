@@ -28,9 +28,11 @@ Markdown記事
      (実行するたびに output/<yyyymmdd_hhmmss>/ という新しいディレクトリに保存される)
 ```
 
-このあと先は人間の作業:
-1. `output/<実行時刻>/voicevox_script.txt` を見ながらVOICEVOXで音声を生成
-2. `output/<実行時刻>/slides/` のPNG画像を画面素材として、DaVinci Resolveのタイムラインに並べる
+このあと先の作業:
+1. VOICEVOXアプリを起動しておき、`uv run voicevox-synthesize --input output/<実行時刻>/voicevox_script.txt` で
+   セリフごとのWAV音声を一括生成（人間の作業ではなく自動化済み）
+2. `output/<実行時刻>/slides/` のPNG画像と、生成された音声(WAV)を素材として、
+   DaVinci Resolveのタイムラインに並べる（この編集作業自体は人間が行う）
 3. 完成した動画をYouTubeにアップロードし、`output/<実行時刻>/description.txt` の内容を概要欄に貼る
    （元記事URLをCLIで渡していない場合はプレースホルダーになっているので、実URLに差し替える）
 
@@ -65,6 +67,27 @@ uv run python -m video_pipeline.main --input articles/sample.md
 
 実行するたびに `output/<yyyymmdd_hhmmss>/`（実行日時のディレクトリ）が新しく作られ、そこに成果物一式が保存される（ベースの `output` 部分は `--output-dir` で変更可）。
 
+## 音声合成（VOICEVOX ENGINE連携）
+
+VOICEVOXアプリを起動しておくと（実体はHTTPサーバとして動作し、デフォルトで
+`http://127.0.0.1:50021` で待ち受ける）、`voicevox_script.txt`から音声を
+一括生成できる。
+
+```bash
+uv run voicevox-synthesize --input output/20260731_153000/voicevox_script.txt
+```
+
+出力先を省略すると、入力ファイルと同じ場所の`audio/`に保存される
+（`--output-dir`で変更可、`--base-url`でVOICEVOXのURLも変更可）。
+
+セリフ1行につき1つのWAVファイル（`001_つむぎ.wav`のように連番+話者名）を
+生成し、DaVinci Resolveのタイムラインに上から順に並べやすくしている。
+あわせて`audio/manifest.json`に、各ファイルと対応するテキストの一覧を書き出す。
+
+話者ID（speaker_id）はVOICEVOXの`/speakers`エンドポイントから「つむぎ」
+「ずんだもん」の名前で自動的に引き当てるため、ハードコードしていない
+（VOICEVOXのバージョンや導入ライブラリによってIDが変わっても動作する）。
+
 ## 出力ファイル
 
 | ファイル | 内容 |
@@ -74,6 +97,7 @@ uv run python -m video_pipeline.main --input articles/sample.md
 | `output/<実行時刻>/slides/` | スライド画像一式(PNG、1枚=1スライド。表紙は`slide_00_title.png`) |
 | `output/<実行時刻>/backgrounds/` | （背景生成有効時）Geminiで生成した背景イラストの元画像 |
 | `output/<実行時刻>/description.txt` | YouTube概要欄用テキスト（概要文・目次・元記事リンク・ハッシュタグ） |
+| `output/<実行時刻>/audio/` | （`voicevox-synthesize`実行後）セリフごとのWAV音声+manifest.json |
 
 ## 構成
 
@@ -82,12 +106,14 @@ video_pipeline/
 ├── config.py            # モデル名・ループ回数・スコア閾値
 ├── claude_client.py      # Claude API呼び出しの共通処理（テキスト/JSON）
 ├── image_generator.py    # Gemini(Nano Banana系)によるスライド背景生成
+├── voicevox_client.py     # ローカルVOICEVOX ENGINEのHTTP APIクライアント
 ├── io_utils.py            # ファイル入出力
 ├── loop.py                # 生成→評価→修正ループの共通ロジック
 ├── slide_image_builder.py # スライド内容(JSON、4レイアウト対応) -> PNG画像(Pillowで直接描画)
 ├── assets/fonts/          # Noto Sans JP(同梱フォント。OS依存を避けるため)
 ├── pipeline.py            # 全体のオーケストレーション
-├── main.py                # CLIエントリーポイント
+├── main.py                # CLIエントリーポイント(video-pipeline)
+├── synthesize_audio.py    # CLIエントリーポイント(voicevox-synthesize)
 └── agents/
     ├── script_agent.py        # 台本の生成・評価・修正
     ├── slides_agent.py        # スライド内容(background_prompt含む)の生成・評価・修正
@@ -155,7 +181,9 @@ Gemini APIの呼び出し回数・コストが動画1本あたりスライド枚
   スライド・VOICEVOXテキストとの整合性チェックは対象外）
 - スライド背景(background_prompt)の妥当性は`slides_agent`の評価観点に軽く含めている
   程度で、総合エージェントの整合性チェック対象には含めていない
-- VOICEVOXへの音声生成そのものは自動化していない
-  （VOICEVOX ENGINEのHTTP APIを叩けば、ここも自動化できる余地がある）
-- DaVinci Resolveでの編集・書き出しも対象外
+- `voicevox_agent`のプロンプトでは`"[話者名] セリフ"`(角括弧あり)の形式を
+  指示しているが、実際には軽量モデル(MODEL_EXTRACT)が角括弧なしの
+  `"話者名 セリフ"`形式で出力することがあった。`voicevox_client.py`の
+  パーサーは既知の話者名（つむぎ/ずんだもん）をもとに両方の形式に対応している
+- DaVinci Resolveでの編集・書き出しは対象外
   （ResolveのPython/Luaスクリプティングでタイムライン組み立てまで拡張する余地がある）
