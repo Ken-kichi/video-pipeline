@@ -1,4 +1,4 @@
-"""記事1本から台本・スライド・VOICEVOX用テキスト・概要欄を生成する一連の流れ。
+"""記事1本から台本・スライド画像・VOICEVOX用テキスト・概要欄を生成する一連の流れ。
 
 流れ:
   1. 台本エージェント: 記事 -> 台本（生成→評価→修正ループ）
@@ -11,9 +11,11 @@
      （生成→評価→修正ループ）
   6. (任意) image_promptが設定されているスライドについて、Gemini(Nano Banana系)で
      挿絵を生成する（GENERATE_SLIDE_IMAGES有効時のみ。失敗しても処理は継続する）
-  7. 台本(.md)・VOICEVOXテキスト(.txt)・スライド(.pptx)・概要欄(.txt)をファイルに保存する
+  7. 台本(.md)・VOICEVOXテキスト(.txt)・スライド画像(.png)・概要欄(.txt)を保存する
+     （.pptxは環境によって開けない事例があったため廃止し、直接PNGを書き出す）
 """
 
+from datetime import datetime
 from pathlib import Path
 
 from video_pipeline.agents import (
@@ -26,7 +28,7 @@ from video_pipeline.agents import (
 from video_pipeline.config import GENERATE_SLIDE_IMAGES, MAX_REVISION_LOOPS, SCORE_THRESHOLD
 from video_pipeline.image_generator import generate_slide_image
 from video_pipeline.io_utils import read_markdown, write_text_file
-from video_pipeline.pptx_builder import build_pptx
+from video_pipeline.slide_image_builder import build_slide_images
 
 DEFAULT_ARTICLE_URL_PLACEHOLDER = "（ここに元記事のURLを貼ってください）"
 
@@ -131,7 +133,7 @@ def run_pipeline(
     print("=== 概要欄エージェント ===")
     description, description_score, _ = description_agent.run(script, article_url)
 
-    output_dir_path = Path(output_dir)
+    output_dir_path = Path(output_dir) / datetime.now().strftime("%Y%m%d_%H%M%S")
 
     if generate_images:
         print("=== スライド挿絵の生成（Gemini） ===")
@@ -140,9 +142,10 @@ def run_pipeline(
     script_path = write_text_file(output_dir_path / "script.md", script)
     voicevox_path = write_text_file(output_dir_path / "voicevox_script.txt", voicevox_text)
     description_path = write_text_file(output_dir_path / "description.txt", description)
-    pptx_path = build_pptx(video_title, slides, output_dir_path / "slides.pptx")
+    slide_image_paths = build_slide_images(video_title, slides, output_dir_path / "slides")
 
     print("\n=== 完了 ===")
+    print(f"出力先ディレクトリ: {output_dir_path}")
     print(
         f"台本スコア: {script_score}点 / "
         f"スライドスコア: {slides_score}点 / "
@@ -152,13 +155,14 @@ def run_pipeline(
     )
     print(f"台本        : {script_path}")
     print(f"VOICEVOXテキスト: {voicevox_path}")
-    print(f"スライド     : {pptx_path}")
+    print(f"スライド画像 : {output_dir_path / 'slides'}/ ({len(slide_image_paths)}枚)")
     print(f"概要欄       : {description_path}")
 
     return {
+        "output_dir": output_dir_path,
         "script_path": script_path,
         "voicevox_path": voicevox_path,
-        "pptx_path": pptx_path,
+        "slide_image_paths": slide_image_paths,
         "description_path": description_path,
         "scores": {
             "script": script_score,

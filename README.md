@@ -21,14 +21,17 @@ Markdown記事
      (任意) Geminiでスライド挿絵を生成 ※GENERATE_SLIDE_IMAGES有効時のみ
                     │
                     ▼
-     output/script.md / output/voicevox_script.txt
-     output/slides.pptx / output/description.txt
+     output/20260731_153000/script.md
+     output/20260731_153000/voicevox_script.txt
+     output/20260731_153000/slides/slide_00_title.png, slide_01.png, ...
+     output/20260731_153000/description.txt
+     (実行するたびに output/<yyyymmdd_hhmmss>/ という新しいディレクトリに保存される)
 ```
 
 このあと先は人間の作業:
-1. `output/voicevox_script.txt` を見ながらVOICEVOXで音声を生成
-2. `output/slides.pptx` を画面素材として、DaVinci Resolveで音声と合わせて編集
-3. 完成した動画をYouTubeにアップロードし、`output/description.txt` の内容を概要欄に貼る
+1. `output/<実行時刻>/voicevox_script.txt` を見ながらVOICEVOXで音声を生成
+2. `output/<実行時刻>/slides/` のPNG画像を画面素材として、DaVinci Resolveのタイムラインに並べる
+3. 完成した動画をYouTubeにアップロードし、`output/<実行時刻>/description.txt` の内容を概要欄に貼る
    （元記事URLをCLIで渡していない場合はプレースホルダーになっているので、実URLに差し替える）
 
 ## セットアップ
@@ -57,16 +60,16 @@ uv run python -m video_pipeline.main --input articles/sample.md
 画像生成モデルは文字・数値の描画が不得意なため、数値や表を含むスライドには
 挿絵を生成しない設計にしている（詳細は下記「スライド挿絵生成について」）。
 
-出力は `output/` 以下に生成される（`--output-dir` で変更可）。
+実行するたびに `output/<yyyymmdd_hhmmss>/`（実行日時のディレクトリ）が新しく作られ、そこに成果物一式が保存される（ベースの `output` 部分は `--output-dir` で変更可）。
 
 ## 出力ファイル
 
 | ファイル | 内容 |
 |---|---|
-| `output/script.md` | ずんだもん×つむぎ形式の動画台本（シーン区切り・画面指示つき、冒頭1分は概要パート） |
-| `output/voicevox_script.txt` | `[話者名] セリフ` 形式の読み上げ用テキスト |
-| `output/slides.pptx` | 台本のシーンに対応したスライド（タイトル・箇条書き・ノート） |
-| `output/description.txt` | YouTube概要欄用テキスト（概要文・目次・元記事リンク・ハッシュタグ） |
+| `output/<実行時刻>/script.md` | ずんだもん×つむぎ形式の動画台本（シーン区切り・画面指示つき、冒頭1分は概要パート） |
+| `output/<実行時刻>/voicevox_script.txt` | `[話者名] セリフ` 形式の読み上げ用テキスト |
+| `output/<実行時刻>/slides/` | スライド画像一式(PNG、1枚=1スライド。表紙は`slide_00_title.png`) |
+| `output/<実行時刻>/description.txt` | YouTube概要欄用テキスト（概要文・目次・元記事リンク・ハッシュタグ） |
 
 ## 構成
 
@@ -77,7 +80,8 @@ video_pipeline/
 ├── image_generator.py    # Gemini(Nano Banana系)によるスライド挿絵生成
 ├── io_utils.py            # ファイル入出力
 ├── loop.py                # 生成→評価→修正ループの共通ロジック
-├── pptx_builder.py        # スライド内容(JSON) + 挿絵 -> .pptx
+├── slide_image_builder.py # スライド内容(JSON) + 挿絵 -> PNG画像(Pillowで直接描画)
+├── assets/fonts/          # Noto Sans JP(同梱フォント。OS依存を避けるため)
 ├── pipeline.py            # 全体のオーケストレーション
 ├── main.py                # CLIエントリーポイント
 └── agents/
@@ -106,8 +110,9 @@ VOICEVOXテキスト抽出のような機械的な作業は軽量モデルを割
 
 `--generate-images` を有効にすると、`slides_agent`が各スライドの内容に応じて
 `image_prompt`（英語、概念的な挿絵の指示）を付け、確定後に`image_generator.py`が
-Gemini APIで実際の画像を生成して`output/images/`に保存、`pptx_builder.py`が
-該当スライドの右側に配置する。
+Gemini APIで実際の画像を生成して`output/<実行時刻>/images/`に保存、
+`slide_image_builder.py`が該当スライド画像(`output/<実行時刻>/slides/`)の
+右側に合成する。
 
 方針として、**数値・表・コードなど正確性が必要なスライドにはimage_promptを
 付けない**よう`slides_agent`に指示している。画像生成モデルは文字や数値を
@@ -120,9 +125,11 @@ Gemini APIで実際の画像を生成して`output/images/`に保存、`pptx_bui
 
 ## 既知の制約・今後の拡張候補
 
-- スライドの箇条書きレイアウトは`python-pptx`のデフォルトテーマのまま
-  （ブランドカラー等に合わせたテンプレートを`Presentation("template.pptx")`
-  のように読み込ませれば、見た目の作り込みは可能）
+- 以前は`python-pptx`で`.pptx`を組み立てていたが、Mac上のPowerPointで開けない
+  事例があったため、直接PNG画像を書き出す方式(`slide_image_builder.py`)に
+  変更した。日本語フォントはOS依存を避けるためNoto Sans JPを同梱している
+- スライドのデザインは固定のシンプルなレイアウト（タイトル+箇条書き+任意の挿絵）。
+  配色やフォントサイズを変えたい場合は`slide_image_builder.py`の定数を編集する
 - 概要欄エージェントは総合エージェントの整合性チェック対象には含めていない
   （確定した台本だけを見て作るため、台本と概要欄の食い違いはチェックされるが、
   スライド・VOICEVOXテキストとの整合性チェックは対象外）
