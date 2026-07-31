@@ -6,6 +6,10 @@
 - stat:        1つの数値・指標を大きく見せる(例: 0.79 -> 0.83)
 - quote:       1行のキーメッセージを大きく見せる
 - comparison:  2つの対象を左右に並べて比較する
+
+どのレイアウトにも background_prompt（背景に敷く抽象イラストの生成プロンプト、
+文字・数字は含めない）を持たせる。実際のテキストは背景の上にPillowで正確に
+描画するため、背景画像に数値やコードの正確性を求める必要はない。
 """
 
 import json
@@ -24,20 +28,20 @@ NotebookLMのVideo Overviewのように、内容によってスライドのレ�
 最も内容に合うlayoutを1つ選んでください。
 
 ## layout: "bullets"（標準。箇条書きで説明する内容）
-{"layout": "bullets", "title": "...", "bullets": ["...", "..."], "notes": "...", "image_prompt": "..."}
+{"layout": "bullets", "title": "...", "bullets": ["...", "..."], "notes": "...", "background_prompt": "..."}
 
 ## layout: "stat"（1つの具体的な数値・指標が主役のスライド。例: 精度の変化）
-{"layout": "stat", "title": "...", "stat_value": "0.79 -> 0.83", "stat_label": "特徴量追加後の精度変化", "notes": "..."}
+{"layout": "stat", "title": "...", "stat_value": "0.79 -> 0.83", "stat_label": "特徴量追加後の精度変化", "notes": "...", "background_prompt": "..."}
 - stat_valueは記事に書かれている数値をそのまま使う(創作しない)
 - stat_valueは短く(20文字程度まで)。長い説明はstat_labelに書く
 
 ## layout: "quote"（1文のキーメッセージを強調したいスライド。例: まとめの核心）
-{"layout": "quote", "quote_text": "データが8割、モデルが2割", "quote_context": "...", "notes": "..."}
+{"layout": "quote", "quote_text": "データが8割、モデルが2割", "quote_context": "...", "notes": "...", "background_prompt": "..."}
 - quote_textは短く力強い1文(20文字前後が目安)
 - quote_contextは補足の一言(無ければ空文字)
 
 ## layout: "comparison"（2つの対象を対比させたいスライド。例: 汎用AI vs 自前モデル）
-{"layout": "comparison", "title": "...", "left_label": "...", "left_bullets": ["...", "..."], "right_label": "...", "right_bullets": ["...", "..."], "notes": "..."}
+{"layout": "comparison", "title": "...", "left_label": "...", "left_bullets": ["...", "..."], "right_label": "...", "right_bullets": ["...", "..."], "notes": "...", "background_prompt": "..."}
 
 制約:
 - 台本のシーン区切り・【画面：〜】指示と対応する形でスライドを分割する
@@ -49,15 +53,17 @@ NotebookLMのVideo Overviewのように、内容によってスライドのレ�
 - 図解（mermaidのフローチャートなど）や表を説明するスライドは、
   bulletsにその要点を言葉で書く（図そのものの画像は後工程で人間が挿入する前提）
 
-image_promptについて（重要。bulletsとcomparisonのみで使用可、stat/quoteでは使わない）:
-- 画像生成モデルは文字・数値を正確に描くのが苦手なので、image_promptは
-  「概念を表す挿絵・比喩的なイラスト」用途に限定する
-- 数値・表・コード・具体的な文字列など、正確性が必要なスライドではimage_promptを
-  空文字にする（挿絵で誤魔化さず、bulletsのテキストで正確に伝える）
-- 挿絵が理解の助けになる概念的なスライド（例:「汎用AIは借り物」「差別化の源泉」）
-  だけ、英語で1〜2文の画像生成プロンプトを書く。プロンプト内で文字や数字を
-  画像に描かせようとする指示は入れない
-- stat/quoteレイアウトはテキスト自体が主役なのでimage_promptは常に空文字にする
+background_promptについて（重要。全レイアウト共通、ほぼ全スライドで書く）:
+- これはスライド全体の背景に敷く抽象的なイラストの生成プロンプト。
+  この上に文字を重ねて描画するので、背景画像自体に文字・数字・記号を
+  描かせる指示は絶対に入れない（画像生成モデルは文字を正確に描けないため。
+  実際の数値や用語はテキストとして別途正確に描画される）
+- スライドの内容を象徴する情景・比喩を英語で1文で書く
+  （例: "a small seedling growing into a tree, representing data accumulation"）
+- 色使いやアートスタイルの指定は不要（後工程で全スライド共通のスタイルに
+  統一するため）。情景・構図の内容だけを書く
+- 適切な情景が思いつかない場合や、抽象的すぎて意味を持たない場合のみ
+  空文字にする（背景無しの単色になる）
 
 出力はJSONのみ: {"slides": [<上記いずれかの形式のオブジェクト>, ...]}
 """
@@ -74,8 +80,9 @@ EVALUATE_SYSTEM = """あなたはスライド構成のレビュアーです。�
   無理に使っていないか、逆に強調すべき数値やキーメッセージがbulletsに埋もれて
   いないか）。"stat"/"quote"/"comparison"を使いすぎて散漫になっていないか
 - stat_valueが記事の数値と一致しているか（創作した数値になっていないか）
-- image_promptが、数値・表・コードなど正確性が必要なスライドや
-  stat/quoteレイアウトで空になっているか（入っていたら減点対象）
+- background_promptに文字・数字を描かせる指示が紛れ込んでいないか
+  （紛れ込んでいたら減点対象）
+- background_promptがスライド内容と無関係になっていないか
 
 JSON形式 {"score": <int>, "feedback": "<改善点。問題なければ空文字>"} のみを返してください。
 """

@@ -17,3 +17,15 @@ def write_text_file(path: str | Path, content: str) -> Path:
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(content, encoding="utf-8")
     return p
+
+
+def extract_h1_title(markdown_text: str) -> str | None:
+    """Markdown内で最初に出てくる見出し1(# )の文字列を抽出する。
+
+    "## はじめに" のような見出し2以下は対象外。見出し1が無ければNoneを返す。
+    """
+    for line in markdown_text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("# ") and not stripped.startswith("##"):
+            return stripped[2:].strip()
+    return None

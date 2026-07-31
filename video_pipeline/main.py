@@ -20,7 +20,11 @@ def main() -> None:
     )
     parser.add_argument("--input", required=True, help="入力Markdown記事のパス")
     parser.add_argument("--output-dir", default="output", help="出力先ディレクトリ（デフォルト: output）")
-    parser.add_argument("--title", default="解説動画", help="スライドの表紙タイトル")
+    parser.add_argument(
+        "--title",
+        default=None,
+        help="スライドの表紙タイトル。未指定なら記事の見出し1(# )を自動で使う",
+    )
     parser.add_argument(
         "--article-url",
         default=None,

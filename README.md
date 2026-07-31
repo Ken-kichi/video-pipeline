@@ -18,7 +18,7 @@ Markdown記事
             概要欄エージェント（確定した台本から概要文・目次・元記事リンク・ハッシュタグを生成）
                     │
                     ▼
-     (任意) Geminiでスライド挿絵を生成 ※GENERATE_SLIDE_IMAGES有効時のみ
+     (任意) Geminiでスライド背景を生成し、その上に文字を重ねる ※GENERATE_SLIDE_IMAGES有効時のみ
                     │
                     ▼
      output/20260731_153000/script.md
@@ -52,13 +52,16 @@ uv run video-pipeline --input articles/sample.md --title "機械学習ってな�
 uv run python -m video_pipeline.main --input articles/sample.md
 ```
 
+`--title` を省略した場合、記事の見出し1（`# 〜`で始まる行）を自動でタイトルに使う。
+見出し1が記事に無ければ「解説動画」になる。
+
 `--article-url` を省略した場合、概要欄の元記事リンク部分にはプレースホルダーが入るので、
 投稿時に手動で差し替える。
 
-`--generate-images` を付けるとGemini(Nano Banana系)でスライドの挿絵を生成する。
-`.env`に`GEMINI_API_KEY`の設定が必要（Claude用の`ANTHROPIC_API_KEY`とは別のキー）。
-画像生成モデルは文字・数値の描画が不得意なため、数値や表を含むスライドには
-挿絵を生成しない設計にしている（詳細は下記「スライド挿絵生成について」）。
+`--generate-images` を付けるとGemini(Nano Banana系)で各スライドの背景イラストを
+生成し、その上に文字を重ねて描画する。`.env`に`GEMINI_API_KEY`の設定が必要
+（Claude用の`ANTHROPIC_API_KEY`とは別のキー）。文字は常にPillowで正確に描画する
+ため、背景画像に数値・専門用語を描かせる必要はない（詳細は下記「スライド背景生成について」）。
 
 実行するたびに `output/<yyyymmdd_hhmmss>/`（実行日時のディレクトリ）が新しく作られ、そこに成果物一式が保存される（ベースの `output` 部分は `--output-dir` で変更可）。
 
@@ -69,6 +72,7 @@ uv run python -m video_pipeline.main --input articles/sample.md
 | `output/<実行時刻>/script.md` | ずんだもん×つむぎ形式の動画台本（シーン区切り・画面指示つき、冒頭1分は概要パート） |
 | `output/<実行時刻>/voicevox_script.txt` | `[話者名] セリフ` 形式の読み上げ用テキスト |
 | `output/<実行時刻>/slides/` | スライド画像一式(PNG、1枚=1スライド。表紙は`slide_00_title.png`) |
+| `output/<実行時刻>/backgrounds/` | （背景生成有効時）Geminiで生成した背景イラストの元画像 |
 | `output/<実行時刻>/description.txt` | YouTube概要欄用テキスト（概要文・目次・元記事リンク・ハッシュタグ） |
 
 ## 構成
@@ -77,7 +81,7 @@ uv run python -m video_pipeline.main --input articles/sample.md
 video_pipeline/
 ├── config.py            # モデル名・ループ回数・スコア閾値
 ├── claude_client.py      # Claude API呼び出しの共通処理（テキスト/JSON）
-├── image_generator.py    # Gemini(Nano Banana系)によるスライド挿絵生成
+├── image_generator.py    # Gemini(Nano Banana系)によるスライド背景生成
 ├── io_utils.py            # ファイル入出力
 ├── loop.py                # 生成→評価→修正ループの共通ロジック
 ├── slide_image_builder.py # スライド内容(JSON、4レイアウト対応) -> PNG画像(Pillowで直接描画)
@@ -86,7 +90,7 @@ video_pipeline/
 ├── main.py                # CLIエントリーポイント
 └── agents/
     ├── script_agent.py        # 台本の生成・評価・修正
-    ├── slides_agent.py        # スライド内容(image_prompt含む)の生成・評価・修正
+    ├── slides_agent.py        # スライド内容(background_prompt含む)の生成・評価・修正
     ├── voicevox_agent.py      # VOICEVOX用テキストの生成・評価・修正
     ├── integration_agent.py   # 3つの横断的な整合性チェック
     └── description_agent.py   # YouTube概要欄（概要文・目次・リンク・タグ）の生成・評価・修正
@@ -102,28 +106,43 @@ VOICEVOXテキスト抽出のような機械的な作業は軽量モデルを割
 - `MODEL_EXTRACT`（環境変数 `CLAUDE_MODEL_EXTRACT`）: VOICEVOXテキストの機械的な抽出。デフォルト `claude-haiku-4-5-20251001`
 - `MAX_REVISION_LOOPS`: 各エージェント（総合エージェントを含む）の生成→評価→修正ループの最大回数（デフォルト3）
 - `SCORE_THRESHOLD`: この点数(0-100)以上で合格とみなす。総合エージェントの整合性スコアにも適用される（デフォルト90）
-- `GENERATE_SLIDE_IMAGES`（環境変数）: スライド挿絵生成を有効にするか（デフォルトはオフ）
-- `GEMINI_IMAGE_MODEL`（環境変数）: 挿絵生成に使うGeminiモデル。デフォルト `gemini-3.1-flash-image-preview`
+- `GENERATE_SLIDE_IMAGES`（環境変数）: スライド背景生成を有効にするか（デフォルトはオフ）
+- `GEMINI_IMAGE_MODEL`（環境変数）: 背景生成に使うGeminiモデル。デフォルト `gemini-3.1-flash-image-preview`
   （Nano Banana 2。より高品質・高価な `gemini-3-pro-image-preview` に変更も可能）
 
-## スライド挿絵生成について
+## スライド背景生成について
 
-`--generate-images` を有効にすると、`slides_agent`が各スライドの内容に応じて
-`image_prompt`（英語、概念的な挿絵の指示）を付け、確定後に`image_generator.py`が
-Gemini APIで実際の画像を生成して`output/<実行時刻>/images/`に保存、
-`slide_image_builder.py`が該当スライド画像(`output/<実行時刻>/slides/`)の
-右側に合成する。
+`--generate-images` を有効にすると、`slides_agent`がほぼ全スライドに
+`background_prompt`（英語、抽象的な情景の指示。文字・数字は含めない）を付け、
+確定後に`image_generator.generate_slide_background()`がGemini APIで実際の
+画像を生成して`output/<実行時刻>/backgrounds/`に保存する。
 
-方針として、**数値・表・コードなど正確性が必要なスライドにはimage_promptを
-付けない**よう`slides_agent`に指示している。画像生成モデルは文字や数値を
-正確に描くのが苦手なため、そうしたスライドは挿絵ではなく箇条書きのテキストで
-正確に伝える設計にしている。挿絵が付くのは「汎用AIは借り物」のような
-概念的な内容のスライドに限られる想定。
+生成した背景は`slide_image_builder.py`がスライド全面に敷いた上で、可読性の
+ために不透明度80%の白いスクリム(半透明パネル)を重ね、その上からタイトル・
+箇条書き・数値などのテキストをPillowで直接描画する。つまり**背景の絵柄が
+どうであれ、実際に表示される数値や専門用語は常に正確**という構造になっている
+（NotebookLMのように画像自体に文字を焼き込む方式とは違い、文字とビジュアルの
+生成経路を完全に分離している）。
+
+複数スライドの絵柄がバラバラにならないよう、`slides_agent`が書いた
+内容依存のプロンプトに対して、`image_generator.BACKGROUND_STYLE_SUFFIX`
+（配色・タッチを固定した文言）をコード側で必ず付け足している。
 
 `GEMINI_API_KEY`が未設定、またはAPI呼び出しが失敗した場合は警告を出して
-そのスライドの挿絵をスキップするだけで、パイプライン全体は止まらない。
+その1枚の背景生成だけをスキップし、単色背景にフォールバックする
+（パイプライン全体は止まらない）。
+
+背景生成はほぼ全スライドに対して行われるため、`--generate-images`を使うと
+Gemini APIの呼び出し回数・コストが動画1本あたりスライド枚数分（10〜16回程度）
+発生する点は把握しておく。
 
 ## 既知の制約・今後の拡張候補
+
+- スライド数が多い記事ではJSON応答が長くなり、`max_tokens`に到達して出力が
+  途中で切れることがあった。`claude_client.py`がレスポンスの`stop_reason`を
+  見て自動的にトークン上限を倍増しながら再生成するようにして対処している
+  （`MAX_TOKENS_CEILING`まで。それでも切れる場合は警告を出しつつ不完全な
+  内容のまま処理を続ける）
 
 - 以前は`python-pptx`で`.pptx`を組み立てていたが、Mac上のPowerPointで開けない
   事例があったため、直接PNG画像を書き出す方式(`slide_image_builder.py`)に
@@ -134,7 +153,7 @@ Gemini APIで実際の画像を生成して`output/<実行時刻>/images/`に保
 - 概要欄エージェントは総合エージェントの整合性チェック対象には含めていない
   （確定した台本だけを見て作るため、台本と概要欄の食い違いはチェックされるが、
   スライド・VOICEVOXテキストとの整合性チェックは対象外）
-- スライド挿絵(image_prompt)の妥当性は`slides_agent`の評価観点に軽く含めている
+- スライド背景(background_prompt)の妥当性は`slides_agent`の評価観点に軽く含めている
   程度で、総合エージェントの整合性チェック対象には含めていない
 - VOICEVOXへの音声生成そのものは自動化していない
   （VOICEVOX ENGINEのHTTP APIを叩けば、ここも自動化できる余地がある）

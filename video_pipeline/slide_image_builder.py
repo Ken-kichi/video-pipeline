@@ -14,6 +14,11 @@ Noto Sans JP(可変フォント、OFLライセンス)をvideo_pipeline/assets/fo
 - stat:       1つの数値・指標を大きく見せる
 - quote:      1行のキーメッセージを大きく見せる
 - comparison: 2つの対象を左右に並べて比較する
+
+背景(Gemini生成、任意): background_pathが設定されている場合、その画像を
+スライド全面に敷き、その上に半透明の白パネル(スクリム)を重ねてから文字を
+描画する。文字は常にPillowで直接描画するため、背景画像がどんな絵柄でも
+数値・専門用語の正確性は保たれる。
 """
 
 from pathlib import Path
@@ -34,6 +39,10 @@ ACCENT_COLOR_SOFT = "#C4CFFB"
 TITLE_COLOR = "#1A1A2E"
 BODY_COLOR = "#2B2D42"
 SUBTITLE_COLOR = "#5C5F77"
+
+# 背景画像の上に敷く白パネルの不透明度(0=透明, 1=完全に白で覆う)。
+# 高めにして、どんな背景画像でも文字の可読性を最優先する。
+SCRIM_OPACITY = 0.80
 
 
 def _load_font(size: int, weight: int = 400) -> ImageFont.FreeTypeFont:
@@ -110,6 +119,34 @@ def _fit_image(image_path: str, max_width: int, max_height: int) -> Image.Image:
     return img
 
 
+def _cover_resize(img: Image.Image, target_w: int, target_h: int) -> Image.Image:
+    """アスペクト比を保ったまま、指定サイズを覆うようにリサイズ+中央クロップする。"""
+    src_w, src_h = img.size
+    scale = max(target_w / src_w, target_h / src_h)
+    new_w, new_h = int(src_w * scale) + 1, int(src_h * scale) + 1
+    img = img.resize((new_w, new_h), Image.LANCZOS)
+    left = (new_w - target_w) // 2
+    top = (new_h - target_h) // 2
+    return img.crop((left, top, left + target_w, top + target_h))
+
+
+def _make_base_canvas(slide_data: dict, fallback_color: str) -> Image.Image:
+    """背景画像(あれば)+スクリムを敷いたキャンバスを作る。無ければ単色背景。"""
+    background_path = slide_data.get("background_path")
+    if background_path and Path(background_path).exists():
+        bg = Image.open(background_path).convert("RGB")
+        bg = _cover_resize(bg, SLIDE_WIDTH, SLIDE_HEIGHT)
+
+        overlay = Image.new("RGBA", bg.size, (0, 0, 0, 0))
+        overlay_draw = ImageDraw.Draw(overlay)
+        alpha = int(255 * SCRIM_OPACITY)
+        overlay_draw.rectangle([(0, 0), bg.size], fill=(255, 255, 255, alpha))
+        combined = Image.alpha_composite(bg.convert("RGBA"), overlay).convert("RGB")
+        return combined
+
+    return Image.new("RGB", (SLIDE_WIDTH, SLIDE_HEIGHT), fallback_color)
+
+
 def _draw_footer(draw: ImageDraw.ImageDraw, slide_number: int) -> None:
     footer_font = _load_font(24, weight=400)
     footer_text = f"{slide_number}"
@@ -122,9 +159,11 @@ def _draw_footer(draw: ImageDraw.ImageDraw, slide_number: int) -> None:
     )
 
 
-def build_title_slide(title: str, subtitle: str, output_path: str | Path) -> Path:
+def build_title_slide(
+    title: str, subtitle: str, output_path: str | Path, background_path: str | None = None
+) -> Path:
     """表紙スライドを生成する。"""
-    img = Image.new("RGB", (SLIDE_WIDTH, SLIDE_HEIGHT), BG_COLOR)
+    img = _make_base_canvas({"background_path": background_path}, BG_COLOR)
     draw = ImageDraw.Draw(img)
 
     draw.rectangle([(0, 0), (SLIDE_WIDTH, 24)], fill=ACCENT_COLOR)
@@ -151,14 +190,10 @@ def build_title_slide(title: str, subtitle: str, output_path: str | Path) -> Pat
 
 
 def _render_bullets(img: Image.Image, draw: ImageDraw.ImageDraw, slide_data: dict) -> None:
-    """タイトル+箇条書き(標準レイアウト)。任意で右側に挿絵を配置する。"""
+    """タイトル+箇条書き(標準レイアウト)。"""
     title_font = _load_font(56, weight=700)
     body_font = _load_font(38, weight=400)
-
-    image_path = slide_data.get("image_path")
     body_max_width = SLIDE_WIDTH - MARGIN * 2
-    if image_path and Path(image_path).exists():
-        body_max_width = int(SLIDE_WIDTH * 0.5) - MARGIN
 
     title_lines = _wrap_text(draw, slide_data.get("title", ""), title_font, body_max_width)
     y = 90
@@ -173,30 +208,25 @@ def _render_bullets(img: Image.Image, draw: ImageDraw.ImageDraw, slide_data: dic
         y = _draw_lines(draw, bullet_lines, body_font, MARGIN, y, BODY_COLOR)
         y += 16
 
-    if image_path and Path(image_path).exists():
-        max_img_width = int(SLIDE_WIDTH * 0.38)
-        max_img_height = SLIDE_HEIGHT - 300
-        thumb = _fit_image(image_path, max_img_width, max_img_height)
-        img_x = SLIDE_WIDTH - MARGIN - thumb.width
-        img_y = (SLIDE_HEIGHT - thumb.height) // 2 + 40
-        img.paste(thumb, (img_x, img_y))
-
 
 def _render_stat(img: Image.Image, draw: ImageDraw.ImageDraw, slide_data: dict) -> None:
     """1つの数値・指標を画面中央に大きく見せるレイアウト。"""
     title = slide_data.get("title", "")
     stat_value = slide_data.get("stat_value", "")
     stat_label = slide_data.get("stat_label", "")
+    has_background = bool(slide_data.get("background_path"))
 
     if title:
         title_font = _load_font(40, weight=700)
         title_lines = _wrap_text(draw, title, title_font, SLIDE_WIDTH - MARGIN * 2)
         _draw_lines_centered(draw, title_lines, title_font, SLIDE_WIDTH // 2, 110, SUBTITLE_COLOR)
 
-    # 数値の背景に淡いアクセント帯を敷く
+    # 背景が無い場合のみ淡いアクセント帯を敷く(背景画像がある場合はスクリムと
+    # 重ねると濃淡が二重になるため省略する)
     band_top = SLIDE_HEIGHT // 2 - 160
     band_bottom = SLIDE_HEIGHT // 2 + 160
-    draw.rectangle([(0, band_top), (SLIDE_WIDTH, band_bottom)], fill=QUOTE_BG_COLOR)
+    if not has_background:
+        draw.rectangle([(0, band_top), (SLIDE_WIDTH, band_bottom)], fill=QUOTE_BG_COLOR)
 
     stat_font = _load_font(140, weight=700)
     stat_lines = _wrap_text(draw, stat_value, stat_font, SLIDE_WIDTH - MARGIN * 2)
@@ -212,16 +242,12 @@ def _render_stat(img: Image.Image, draw: ImageDraw.ImageDraw, slide_data: dict) 
 
 def _render_quote(img: Image.Image, draw: ImageDraw.ImageDraw, slide_data: dict) -> None:
     """1文のキーメッセージを画面中央に大きく見せるレイアウト。"""
-    # 全面に淡いアクセント背景を敷いて他のスライドと視覚的に区別する
-    draw.rectangle([(0, 0), (SLIDE_WIDTH, SLIDE_HEIGHT)], fill=QUOTE_BG_COLOR)
-    draw.rectangle([(0, 0), (SLIDE_WIDTH, 24)], fill=ACCENT_COLOR)
-
     quote_text = slide_data.get("quote_text", "")
     quote_context = slide_data.get("quote_context", "")
 
     # 装飾用の大きな引用符
     mark_font = _load_font(220, weight=700)
-    draw.text((MARGIN - 20, 60), "“", font=mark_font, fill=ACCENT_COLOR_SOFT)
+    draw.text((MARGIN - 20, 60), "\u201c", font=mark_font, fill=ACCENT_COLOR_SOFT)
 
     quote_font = _load_font(88, weight=700)
     quote_lines = _wrap_text(draw, quote_text, quote_font, SLIDE_WIDTH - MARGIN * 2)
@@ -259,7 +285,6 @@ def _render_comparison(img: Image.Image, draw: ImageDraw.ImageDraw, slide_data: 
     right_x = MARGIN + column_width + 80
     divider_x = SLIDE_WIDTH // 2
 
-    # 中央の区切り線
     draw.line([(divider_x, content_top), (divider_x, SLIDE_HEIGHT - 120)], fill=ACCENT_COLOR_SOFT, width=3)
 
     for x, label_key, bullets_key in (
@@ -283,16 +308,27 @@ _LAYOUT_RENDERERS = {
     "comparison": _render_comparison,
 }
 
+_LAYOUT_FALLBACK_COLOR = {
+    "bullets": BG_COLOR,
+    "stat": BG_COLOR,
+    "quote": QUOTE_BG_COLOR,
+    "comparison": BG_COLOR,
+}
+
 
 def build_content_slide(slide_data: dict, slide_number: int, output_path: str | Path) -> Path:
-    """本編の1スライドを生成する。layoutフィールドに応じて描画方法を切り替える。"""
-    img = Image.new("RGB", (SLIDE_WIDTH, SLIDE_HEIGHT), BG_COLOR)
+    """本編の1スライドを生成する。layoutフィールドに応じて描画方法を切り替える。
+
+    background_pathが設定されていれば、その画像+スクリムを土台にして
+    テキストを重ねる。無ければlayoutごとの単色背景になる。
+    """
+    layout = slide_data.get("layout", "bullets")
+    fallback_color = _LAYOUT_FALLBACK_COLOR.get(layout, BG_COLOR)
+
+    img = _make_base_canvas(slide_data, fallback_color)
     draw = ImageDraw.Draw(img)
 
-    layout = slide_data.get("layout", "bullets")
-    if layout != "quote":
-        # quoteレイアウトは背景ごと専用の色を敷くため、ここでは共通のアクセント帯のみ
-        draw.rectangle([(0, 0), (SLIDE_WIDTH, 16)], fill=ACCENT_COLOR)
+    draw.rectangle([(0, 0), (SLIDE_WIDTH, 16)], fill=ACCENT_COLOR)
 
     renderer = _LAYOUT_RENDERERS.get(layout, _render_bullets)
     renderer(img, draw, slide_data)
@@ -305,12 +341,21 @@ def build_content_slide(slide_data: dict, slide_number: int, output_path: str | 
     return output_path
 
 
-def build_slide_images(title: str, slides: list[dict], output_dir: str | Path) -> list[Path]:
+def build_slide_images(
+    title: str, slides: list[dict], output_dir: str | Path, title_background_path: str | None = None
+) -> list[Path]:
     """表紙+各スライドをPNGとして書き出し、生成したファイルパスの一覧を返す。"""
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    paths = [build_title_slide(title, "VOICEVOX解説動画 スライド", output_dir / "slide_00_title.png")]
+    paths = [
+        build_title_slide(
+            title,
+            "VOICEVOX解説動画 スライド",
+            output_dir / "slide_00_title.png",
+            background_path=title_background_path,
+        )
+    ]
     for i, slide_data in enumerate(slides, start=1):
         path = build_content_slide(slide_data, i, output_dir / f"slide_{i:02d}.png")
         paths.append(path)
