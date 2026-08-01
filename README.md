@@ -212,6 +212,89 @@ VOICEVOXテキスト抽出のような機械的な作業は軽量モデルを割
 Gemini APIの呼び出し回数・コストが動画1本あたりスライド枚数分（10〜16回程度）
 発生する点は把握しておく。
 
+## トラブルシューティング
+
+実際に開発中に遭遇したトラブルと対処法をまとめている。
+
+### `ModuleNotFoundError: No module named 'video_pipeline'`
+
+`video-pipeline`・`voicevox-synthesize`・`render-video`のいずれかを実行したときに
+このエラーが出て、`uv run python -c "import video_pipeline"`は成功する場合、
+インストール済みのコンソールスクリプト（`.venv/bin/`以下）だけが壊れている状態。
+
+**すぐ動かす回避策**: コンソールスクリプトを経由せず、モジュールとして直接実行する。
+
+```bash
+uv run python -m video_pipeline.main --input articles/sample.md
+uv run python -m video_pipeline.synthesize_audio --input output/<実行時刻>/voicevox_script.txt
+uv run python -m video_pipeline.render_video --script output/<実行時刻>/script.md --slides-dir output/<実行時刻>/slides --output output/<実行時刻>/final_video.mp4
+```
+
+**根本的な直し方**: venvを作り直す。
+
+```bash
+rm -rf .venv uv.lock
+uv cache clean
+uv sync
+uv run video-pipeline --help
+```
+
+**再発する・作り直してもすぐ壊れる場合**: プロジェクトの置き場所を疑う。
+`~/Desktop`や`~/Documents`配下で作業していると、Macの「iCloud Drive: デスクトップと
+書類のフォルダ」同期が原因で`.venv`内の大量の小さいファイルが同期対象になり、
+不定期に退避（evict）されて壊れることがある（動いたり動かなかったりする、
+コマンドによって成功・失敗がバラつく、という症状が特徴）。
+
+```
+システム設定 → Apple ID名 → iCloud → iCloud Drive → オプション
+→「デスクトップと書類のフォルダ」がオンになっていないか確認
+```
+
+オンになっていた場合は、プロジェクトをiCloud同期の対象外の場所に移動する。
+
+```bash
+mkdir -p ~/dev
+mv ~/Desktop/video-pipeline ~/dev/video-pipeline
+cd ~/dev/video-pipeline
+rm -rf .venv uv.lock
+uv sync
+```
+
+### `warning: VIRTUAL_ENV=... does not match the project environment path`
+
+以前に別の場所（例: 移動前の`~/Desktop/video-pipeline/.venv`）を`source .venv/bin/activate`
+などで手動アクティベートしたままになっていると出る警告。`uv run`は正しく無視して
+現在のプロジェクトの`.venv`を使うので実害はない。気になる場合はターミナルを
+開き直すか、`deactivate`してから`uv run`を実行すると警告が消える。
+
+### `話者「つむぎ」が見つかりません`
+
+VOICEVOXアプリでの登録名が「春日部つむぎ」のようにフルネームだと、台本上の
+短縮名「つむぎ」と完全一致しないために起きていた。`voicevox_client.resolve_speaker_id`
+は完全一致→部分一致の順で探すよう修正済みなので、最新版なら発生しないはず。
+それでも起きる場合はエラーメッセージに表示される「VOICEVOXに登録されている話者」
+一覧を確認する。
+
+### `[Errno 2] No such file or directory: 'ffmpeg'`
+
+`render-video`はffmpegを外部コマンドとして呼び出すため、別途インストールが必要
+（Pythonの依存関係(`uv sync`)には含まれない）。
+
+```bash
+brew install ffmpeg
+which ffmpeg   # パスが表示されればOK
+```
+
+Homebrew自体が無い場合は先に https://brew.sh の案内に従ってインストールする。
+
+### `output/<実行時刻>/slides/manifest.json が見つかりません`
+
+`render-video`が要求する`slides/manifest.json`（各スライドの`scene_number`を
+記録したファイル）は、それが導入された時点より前の`video-pipeline`実行結果には
+存在しない。古い`output/`ディレクトリに対して`render-video`を実行しようとすると
+このエラーになる。`video-pipeline`を再実行して新しい`output/<実行時刻>/`を
+作り直してから`render-video`を実行する。
+
 ## 既知の制約・今後の拡張候補
 
 - スライド数が多い記事ではJSON応答が長くなり、`max_tokens`に到達して出力が
