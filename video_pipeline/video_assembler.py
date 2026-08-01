@@ -89,6 +89,18 @@ def _format_ass_time(seconds: float) -> str:
     return f"{hours}:{minutes:02d}:{secs:02d}.{cs:02d}"
 
 
+def _quote_ffmpeg_filter_value(value: str) -> str:
+    """ffmpegのフィルタグラフ構文でパス等を安全に渡すためシングルクォートで囲む。
+
+    ffmpegのフィルタ引数パーサーは":"を区切り文字として使うため、パスに
+    ":"が含まれる場合や、ffmpegのバージョンによって位置引数(filename=を
+    省略した書き方)を受け付けない場合に備え、常に明示的なkey=value形式
+    かつシングルクォート囲みで渡す(呼び出し側でfilename=/fontsdir=を付ける)。
+    """
+    escaped = value.replace("'", "'\\''")
+    return f"'{escaped}'"
+
+
 def synthesize_timeline(
     script_text: str,
     work_dir: str | Path,
@@ -318,13 +330,13 @@ def assemble_video(
     )
 
     print("=== 音声・映像・字幕を合成中 ===")
-    ass_path_str = str(ass_path.resolve()).replace("\\", "/").replace(":", "\\:")
-    fonts_dir_str = str(FONTS_DIR.resolve()).replace("\\", "/").replace(":", "\\:")
+    ass_path_arg = _quote_ffmpeg_filter_value(str(ass_path.resolve()))
+    fonts_dir_arg = _quote_ffmpeg_filter_value(str(FONTS_DIR.resolve()))
     _run_ffmpeg(
         [
             "-i", str(silent_video_path),
             "-i", str(full_audio_path),
-            "-vf", f"ass={ass_path_str}:fontsdir={fonts_dir_str}",
+            "-vf", f"ass=filename={ass_path_arg}:fontsdir={fonts_dir_arg}",
             "-map", "0:v:0", "-map", "1:a:0",
             "-c:v", "libx264", "-pix_fmt", "yuv420p",
             "-c:a", "aac",

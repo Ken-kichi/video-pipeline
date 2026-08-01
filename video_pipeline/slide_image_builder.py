@@ -27,8 +27,7 @@ import json
 
 from PIL import Image, ImageDraw, ImageFont
 
-FONT_PATH = Path(__file__).parent / "assets" / \
-    "fonts" / "NotoSansJP-Variable.ttf"
+FONT_PATH = Path(__file__).parent / "assets" / "fonts" / "NotoSansJP-Variable.ttf"
 
 SLIDE_WIDTH = 1920
 SLIDE_HEIGHT = 1080
@@ -144,8 +143,7 @@ def _make_base_canvas(slide_data: dict, fallback_color: str) -> Image.Image:
         overlay_draw = ImageDraw.Draw(overlay)
         alpha = int(255 * SCRIM_OPACITY)
         overlay_draw.rectangle([(0, 0), bg.size], fill=(255, 255, 255, alpha))
-        combined = Image.alpha_composite(
-            bg.convert("RGBA"), overlay).convert("RGB")
+        combined = Image.alpha_composite(bg.convert("RGBA"), overlay).convert("RGB")
         return combined
 
     return Image.new("RGB", (SLIDE_WIDTH, SLIDE_HEIGHT), fallback_color)
@@ -176,12 +174,10 @@ def build_title_slide(
     subtitle_font = _load_font(36, weight=400)
 
     title_lines = _wrap_text(draw, title, title_font, SLIDE_WIDTH - MARGIN * 2)
-    subtitle_lines = _wrap_text(
-        draw, subtitle, subtitle_font, SLIDE_WIDTH - MARGIN * 2)
+    subtitle_lines = _wrap_text(draw, subtitle, subtitle_font, SLIDE_WIDTH - MARGIN * 2)
 
     total_height = (
-        _block_height(title_lines, title_font) + 40 +
-        _block_height(subtitle_lines, subtitle_font)
+        _block_height(title_lines, title_font) + 40 + _block_height(subtitle_lines, subtitle_font)
     )
 
     y = (SLIDE_HEIGHT - total_height) // 2
@@ -201,19 +197,16 @@ def _render_bullets(img: Image.Image, draw: ImageDraw.ImageDraw, slide_data: dic
     body_font = _load_font(38, weight=400)
     body_max_width = SLIDE_WIDTH - MARGIN * 2
 
-    title_lines = _wrap_text(draw, slide_data.get(
-        "title", ""), title_font, body_max_width)
+    title_lines = _wrap_text(draw, slide_data.get("title", ""), title_font, body_max_width)
     y = 90
     y = _draw_lines(draw, title_lines, title_font, MARGIN, y, TITLE_COLOR)
 
     y += 20
-    draw.line([(MARGIN, y), (MARGIN + body_max_width, y)],
-              fill=ACCENT_COLOR, width=4)
+    draw.line([(MARGIN, y), (MARGIN + body_max_width, y)], fill=ACCENT_COLOR, width=4)
     y += 50
 
     for bullet in slide_data.get("bullets", []):
-        bullet_lines = _wrap_text(
-            draw, f"・{bullet}", body_font, body_max_width)
+        bullet_lines = _wrap_text(draw, f"・{bullet}", body_font, body_max_width)
         y = _draw_lines(draw, bullet_lines, body_font, MARGIN, y, BODY_COLOR)
         y += 16
 
@@ -227,33 +220,26 @@ def _render_stat(img: Image.Image, draw: ImageDraw.ImageDraw, slide_data: dict) 
 
     if title:
         title_font = _load_font(40, weight=700)
-        title_lines = _wrap_text(
-            draw, title, title_font, SLIDE_WIDTH - MARGIN * 2)
-        _draw_lines_centered(draw, title_lines, title_font,
-                             SLIDE_WIDTH // 2, 110, SUBTITLE_COLOR)
+        title_lines = _wrap_text(draw, title, title_font, SLIDE_WIDTH - MARGIN * 2)
+        _draw_lines_centered(draw, title_lines, title_font, SLIDE_WIDTH // 2, 110, SUBTITLE_COLOR)
 
     # 背景が無い場合のみ淡いアクセント帯を敷く(背景画像がある場合はスクリムと
     # 重ねると濃淡が二重になるため省略する)
     band_top = SLIDE_HEIGHT // 2 - 160
     band_bottom = SLIDE_HEIGHT // 2 + 160
     if not has_background:
-        draw.rectangle(
-            [(0, band_top), (SLIDE_WIDTH, band_bottom)], fill=QUOTE_BG_COLOR)
+        draw.rectangle([(0, band_top), (SLIDE_WIDTH, band_bottom)], fill=QUOTE_BG_COLOR)
 
     stat_font = _load_font(140, weight=700)
-    stat_lines = _wrap_text(draw, stat_value, stat_font,
-                            SLIDE_WIDTH - MARGIN * 2)
+    stat_lines = _wrap_text(draw, stat_value, stat_font, SLIDE_WIDTH - MARGIN * 2)
     stat_height = _block_height(stat_lines, stat_font)
     y = (band_top + band_bottom) // 2 - stat_height // 2
-    _draw_lines_centered(draw, stat_lines, stat_font,
-                         SLIDE_WIDTH // 2, y, ACCENT_COLOR)
+    _draw_lines_centered(draw, stat_lines, stat_font, SLIDE_WIDTH // 2, y, ACCENT_COLOR)
 
     if stat_label:
         label_font = _load_font(34, weight=400)
-        label_lines = _wrap_text(
-            draw, stat_label, label_font, SLIDE_WIDTH - MARGIN * 2)
-        _draw_lines_centered(draw, label_lines, label_font,
-                             SLIDE_WIDTH // 2, band_bottom + 50, BODY_COLOR)
+        label_lines = _wrap_text(draw, stat_label, label_font, SLIDE_WIDTH - MARGIN * 2)
+        _draw_lines_centered(draw, label_lines, label_font, SLIDE_WIDTH // 2, band_bottom + 50, BODY_COLOR)
 
 
 def _render_quote(img: Image.Image, draw: ImageDraw.ImageDraw, slide_data: dict) -> None:
@@ -263,27 +249,22 @@ def _render_quote(img: Image.Image, draw: ImageDraw.ImageDraw, slide_data: dict)
 
     # 装飾用の大きな引用符
     mark_font = _load_font(220, weight=700)
-    draw.text((MARGIN - 20, 60), "\u201c",
-              font=mark_font, fill=ACCENT_COLOR_SOFT)
+    draw.text((MARGIN - 20, 60), "\u201c", font=mark_font, fill=ACCENT_COLOR_SOFT)
 
     quote_font = _load_font(88, weight=700)
-    quote_lines = _wrap_text(
-        draw, quote_text, quote_font, SLIDE_WIDTH - MARGIN * 2)
+    quote_lines = _wrap_text(draw, quote_text, quote_font, SLIDE_WIDTH - MARGIN * 2)
     context_font = _load_font(32, weight=400)
-    context_lines = _wrap_text(
-        draw, quote_context, context_font, SLIDE_WIDTH - MARGIN * 2) if quote_context else []
+    context_lines = _wrap_text(draw, quote_context, context_font, SLIDE_WIDTH - MARGIN * 2) if quote_context else []
 
     total_height = _block_height(quote_lines, quote_font)
     if context_lines:
         total_height += 40 + _block_height(context_lines, context_font)
 
     y = (SLIDE_HEIGHT - total_height) // 2
-    y = _draw_lines_centered(
-        draw, quote_lines, quote_font, SLIDE_WIDTH // 2, y, TITLE_COLOR)
+    y = _draw_lines_centered(draw, quote_lines, quote_font, SLIDE_WIDTH // 2, y, TITLE_COLOR)
     if context_lines:
         y += 40
-        _draw_lines_centered(draw, context_lines, context_font,
-                             SLIDE_WIDTH // 2, y, SUBTITLE_COLOR)
+        _draw_lines_centered(draw, context_lines, context_font, SLIDE_WIDTH // 2, y, SUBTITLE_COLOR)
 
 
 def _render_comparison(img: Image.Image, draw: ImageDraw.ImageDraw, slide_data: dict) -> None:
@@ -292,11 +273,9 @@ def _render_comparison(img: Image.Image, draw: ImageDraw.ImageDraw, slide_data: 
     label_font = _load_font(40, weight=700)
     body_font = _load_font(34, weight=400)
 
-    title_lines = _wrap_text(draw, slide_data.get(
-        "title", ""), title_font, SLIDE_WIDTH - MARGIN * 2)
+    title_lines = _wrap_text(draw, slide_data.get("title", ""), title_font, SLIDE_WIDTH - MARGIN * 2)
     y_title = 90
-    y_after_title = _draw_lines(
-        draw, title_lines, title_font, MARGIN, y_title, TITLE_COLOR)
+    y_after_title = _draw_lines(draw, title_lines, title_font, MARGIN, y_title, TITLE_COLOR)
     y_after_title += 20
     draw.line(
         [(MARGIN, y_after_title), (SLIDE_WIDTH - MARGIN, y_after_title)], fill=ACCENT_COLOR, width=4
@@ -308,21 +287,18 @@ def _render_comparison(img: Image.Image, draw: ImageDraw.ImageDraw, slide_data: 
     right_x = MARGIN + column_width + 80
     divider_x = SLIDE_WIDTH // 2
 
-    draw.line([(divider_x, content_top), (divider_x, SLIDE_HEIGHT - 120)],
-              fill=ACCENT_COLOR_SOFT, width=3)
+    draw.line([(divider_x, content_top), (divider_x, SLIDE_HEIGHT - 120)], fill=ACCENT_COLOR_SOFT, width=3)
 
     for x, label_key, bullets_key in (
         (left_x, "left_label", "left_bullets"),
         (right_x, "right_label", "right_bullets"),
     ):
         y = content_top
-        label_lines = _wrap_text(draw, slide_data.get(
-            label_key, ""), label_font, column_width)
+        label_lines = _wrap_text(draw, slide_data.get(label_key, ""), label_font, column_width)
         y = _draw_lines(draw, label_lines, label_font, x, y, ACCENT_COLOR)
         y += 20
         for bullet in slide_data.get(bullets_key, []):
-            bullet_lines = _wrap_text(
-                draw, f"・{bullet}", body_font, column_width)
+            bullet_lines = _wrap_text(draw, f"・{bullet}", body_font, column_width)
             y = _draw_lines(draw, bullet_lines, body_font, x, y, BODY_COLOR)
             y += 14
 
@@ -381,16 +357,15 @@ def build_slide_images(
 
     title_path = build_title_slide(
         title,
+        "VOICEVOX解説動画 スライド",
         output_dir / "slide_00_title.png",
         background_path=title_background_path,
     )
     paths = [title_path]
-    manifest = [{"file": title_path.name,
-                 "scene_number": None, "layout": "title"}]
+    manifest = [{"file": title_path.name, "scene_number": None, "layout": "title"}]
 
     for i, slide_data in enumerate(slides, start=1):
-        path = build_content_slide(
-            slide_data, i, output_dir / f"slide_{i:02d}.png")
+        path = build_content_slide(slide_data, i, output_dir / f"slide_{i:02d}.png")
         paths.append(path)
         manifest.append(
             {

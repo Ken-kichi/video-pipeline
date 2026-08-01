@@ -97,7 +97,9 @@ VOICEVOX上の登録名が「春日部つむぎ」のようにフルネームの
 
 ## 動画の自動組み立て（字幕焼き込み込み）
 
-VOICEVOXアプリと**ffmpeg**（要インストール。Macなら`brew install ffmpeg`）を
+VOICEVOXアプリと**ffmpeg**（要インストール。Macなら`brew install ffmpeg-full`。
+`libass`(字幕焼き込み用)を含む必要があるため、軽量版の`brew install ffmpeg`
+だと`ass`フィルタが無くエラーになる。詳細は下記トラブルシューティング参照）を
 起動しておくと、台本・スライド・音声から色分け字幕つきの完成動画を1本のmp4に
 組み立てられる。
 
@@ -278,14 +280,36 @@ VOICEVOXアプリでの登録名が「春日部つむぎ」のようにフルネ
 ### `[Errno 2] No such file or directory: 'ffmpeg'`
 
 `render-video`はffmpegを外部コマンドとして呼び出すため、別途インストールが必要
-（Pythonの依存関係(`uv sync`)には含まれない）。
+（Pythonの依存関係(`uv sync`)には含まれない）。字幕焼き込みに`libass`が必要なので、
+軽量版の`ffmpeg`ではなく`ffmpeg-full`を入れる（理由は次項参照）。
 
 ```bash
-brew install ffmpeg
+brew install ffmpeg-full
 which ffmpeg   # パスが表示されればOK
+ffmpeg -filters | grep ass   # ass / subtitles が表示されればOK
 ```
 
 Homebrew自体が無い場合は先に https://brew.sh の案内に従ってインストールする。
+
+### `[AVFilterGraph] No such filter: 'ass'` / `No option name near '...captions.ass:fontsdir=...'`
+
+**根本原因はHomebrewのffmpegが軽量版になっていること。** 2026年以降、Homebrewの
+`ffmpeg`フォーミュラ（`ffmpeg@8`）は主要コーデックのみの軽量版がデフォルトになり、
+`libass`（字幕焼き込みライブラリ）が含まれていない。この場合`ass`/`subtitles`
+フィルタ自体が存在せず、`No such filter: 'ass'`というエラーになる
+（バージョンや状況によっては、クォートの書き方の問題に見える
+`No option name near ...`という紛らわしいエラーが先に出ることもある）。
+
+`ffmpeg -filters | grep ass` を実行して何も表示されなければ`libass`無しの
+軽量版が入っている。**機能フル版に入れ替える**。
+
+```bash
+brew uninstall ffmpeg
+brew install ffmpeg-full
+ffmpeg -filters | grep ass   # ass / subtitles が表示されればOK
+```
+
+`ffmpeg-full`が正しくリンクされない場合は`brew link --overwrite ffmpeg-full`を試す。
 
 ### `output/<実行時刻>/slides/manifest.json が見つかりません`
 
