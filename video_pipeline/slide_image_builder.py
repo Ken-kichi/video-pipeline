@@ -23,6 +23,8 @@ Noto Sans JP(可変フォント、OFLライセンス)をvideo_pipeline/assets/fo
 
 from pathlib import Path
 
+import json
+
 from PIL import Image, ImageDraw, ImageFont
 
 FONT_PATH = Path(__file__).parent / "assets" / "fonts" / "NotoSansJP-Variable.ttf"
@@ -344,19 +346,38 @@ def build_content_slide(slide_data: dict, slide_number: int, output_path: str | 
 def build_slide_images(
     title: str, slides: list[dict], output_dir: str | Path, title_background_path: str | None = None
 ) -> list[Path]:
-    """表紙+各スライドをPNGとして書き出し、生成したファイルパスの一覧を返す。"""
+    """表紙+各スライドをPNGとして書き出し、生成したファイルパスの一覧を返す。
+
+    あわせて manifest.json に各スライドファイルと scene_number の対応を
+    書き出す(動画組み立て時に、どのシーンの音声が流れている間にどの
+    スライドを表示するかを決めるために使う)。
+    """
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    paths = [
-        build_title_slide(
-            title,
-            "VOICEVOX解説動画 スライド",
-            output_dir / "slide_00_title.png",
-            background_path=title_background_path,
-        )
-    ]
+    title_path = build_title_slide(
+        title,
+        "VOICEVOX解説動画 スライド",
+        output_dir / "slide_00_title.png",
+        background_path=title_background_path,
+    )
+    paths = [title_path]
+    manifest = [{"file": title_path.name, "scene_number": None, "layout": "title"}]
+
     for i, slide_data in enumerate(slides, start=1):
         path = build_content_slide(slide_data, i, output_dir / f"slide_{i:02d}.png")
         paths.append(path)
+        manifest.append(
+            {
+                "file": path.name,
+                "scene_number": slide_data.get("scene_number"),
+                "layout": slide_data.get("layout", "bullets"),
+            }
+        )
+
+    manifest_path = output_dir / "manifest.json"
+    manifest_path.write_text(
+        json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+
     return paths

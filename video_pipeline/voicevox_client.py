@@ -37,21 +37,38 @@ def resolve_speaker_id(
 ) -> int:
     """話者名(例: "ずんだもん")とスタイル名(例: "ノーマル")からspeaker_idを引く。
 
+    VOICEVOXに登録されている名前は「春日部つむぎ」のようにフルネームだが、
+    台本上は「つむぎ」のように短縮した名前で呼んでいる場合があるため、
+    完全一致が無ければ部分一致（どちらかがどちらかを含む）でも探す。
     指定したスタイルが見つからない場合は、その話者の最初のスタイルにフォールバックする。
     """
+    matched_speaker = None
     for speaker in speakers:
-        if speaker.get("name") != character_name:
-            continue
-        styles = speaker.get("styles", [])
-        for style in styles:
-            if style.get("name") == style_name:
-                return style["id"]
-        if styles:
-            return styles[0]["id"]
-    raise ValueError(
-        f"話者「{character_name}」が見つかりません。"
-        "VOICEVOXアプリでそのキャラクターの音声ライブラリが有効か確認してください。"
-    )
+        if speaker.get("name") == character_name:
+            matched_speaker = speaker
+            break
+
+    if matched_speaker is None:
+        for speaker in speakers:
+            name = speaker.get("name", "")
+            if character_name in name or name in character_name:
+                matched_speaker = speaker
+                break
+
+    if matched_speaker is None:
+        available = ", ".join(s.get("name", "?") for s in speakers)
+        raise ValueError(
+            f"話者「{character_name}」が見つかりません。"
+            f"VOICEVOXに登録されている話者: {available}"
+        )
+
+    styles = matched_speaker.get("styles", [])
+    for style in styles:
+        if style.get("name") == style_name:
+            return style["id"]
+    if styles:
+        return styles[0]["id"]
+    raise ValueError(f"話者「{matched_speaker.get('name')}」にスタイルが登録されていません")
 
 
 def synthesize(text: str, speaker_id: int, base_url: str = DEFAULT_BASE_URL) -> bytes:

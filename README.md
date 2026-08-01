@@ -29,12 +29,17 @@ Markdown記事
 ```
 
 このあと先の作業:
-1. VOICEVOXアプリを起動しておき、`uv run voicevox-synthesize --input output/<実行時刻>/voicevox_script.txt` で
-   セリフごとのWAV音声を一括生成（人間の作業ではなく自動化済み）
-2. `output/<実行時刻>/slides/` のPNG画像と、生成された音声(WAV)を素材として、
-   DaVinci Resolveのタイムラインに並べる（この編集作業自体は人間が行う）
-3. 完成した動画をYouTubeにアップロードし、`output/<実行時刻>/description.txt` の内容を概要欄に貼る
-   （元記事URLをCLIで渡していない場合はプレースホルダーになっているので、実URLに差し替える）
+- **選択肢A: 完全自動で動画まで作る**
+  VOICEVOXアプリとffmpegを起動しておき、
+  `uv run render-video --script output/<実行時刻>/script.md --slides-dir output/<実行時刻>/slides --output output/<実行時刻>/final_video.mp4`
+  を実行すると、音声合成・スライド表示・話者ごとに色分けした字幕（つむぎ=黄色系、
+  ずんだもん=緑系）の焼き込みまで自動で行い、1本のmp4が完成する
+- **選択肢B: DaVinci Resolveで手動編集したい場合**
+  1. `uv run voicevox-synthesize --input output/<実行時刻>/voicevox_script.txt` でセリフごとのWAV音声を一括生成
+  2. `output/<実行時刻>/slides/` のPNG画像と生成した音声(WAV)を素材として、DaVinci Resolveのタイムラインに並べる
+
+いずれの場合も、完成した動画をYouTubeにアップロードし、`output/<実行時刻>/description.txt` の内容を概要欄に貼る
+（元記事URLをCLIで渡していない場合はプレースホルダーになっているので、実URLに差し替える）
 
 ## セットアップ
 
@@ -87,6 +92,47 @@ uv run voicevox-synthesize --input output/20260731_153000/voicevox_script.txt
 話者ID（speaker_id）はVOICEVOXの`/speakers`エンドポイントから「つむぎ」
 「ずんだもん」の名前で自動的に引き当てるため、ハードコードしていない
 （VOICEVOXのバージョンや導入ライブラリによってIDが変わっても動作する）。
+VOICEVOX上の登録名が「春日部つむぎ」のようにフルネームの場合も、
+部分一致で解決するので台本上の短縮名（「つむぎ」）のままで問題ない。
+
+## 動画の自動組み立て（字幕焼き込み込み）
+
+VOICEVOXアプリと**ffmpeg**（要インストール。Macなら`brew install ffmpeg`）を
+起動しておくと、台本・スライド・音声から色分け字幕つきの完成動画を1本のmp4に
+組み立てられる。
+
+```bash
+uv run render-video \
+  --script output/20260731_153000/script.md \
+  --slides-dir output/20260731_153000/slides \
+  --output output/20260731_153000/final_video.mp4
+```
+
+流れ:
+1. `script_parser.py`が`script.md`を正規表現で決定的にパースし、
+   「どのセリフがどのシーンに属するか」を確定させる
+   （`voicevox_agent`のLLM抽出は経由しない。台本と音声・字幕を確実に一致させるため）
+2. 各セリフをVOICEVOX ENGINEで直接音声合成し、長さを計測
+3. `slides/manifest.json`の`scene_number`をもとに、各スライドの表示時間
+   （＝対応するシーンの音声の合計時間）を計算。1つのシーンに複数のスライドが
+   割り当てられていれば均等割り、対応するスライドが無いシーンは直前の
+   スライドの表示を延長する
+4. セリフごとのタイミングで**ASS形式**の字幕を生成する。話者ごとに
+   スタイルを分け、つむぎ＝黄色系(`&H0000E5FF`)、ずんだもん＝緑系(`&H0055AA55`)
+   で色分けする（`video_assembler.SUBTITLE_STYLE_COLORS`で変更可）
+5. ffmpegで (a)音声を結合 (b)スライド画像を表示時間通りに並べた無音動画を作成
+   (c) 動画+音声+字幕を1本のmp4に合成する
+
+日本語フォントはfontconfig経由の解決に頼らず、`assets/fonts/`に同梱した
+静的なNoto Sans JP(Bold/Regular)を`fontsdir`オプションで直接指定している
+（可変フォントだとfontconfigがウェイトを正しく解決できず文字化けする
+事例があったため、字幕用には別途静的フォントを追加で同梱している）。
+
+`--script`と`--slides-dir`はvideo-pipelineの出力からそのまま使うが、
+音声合成自体は`render-video`が内部で直接行う（`voicevox-synthesize`や
+`voicevox_script.txt`は経由しない）。これは字幕・シーン番号と音声を
+確実に一致させるための設計で、`voicevox-synthesize`（DaVinci Resolveで
+手動編集したい場合向け）とは独立した経路になっている。
 
 ## 出力ファイル
 
@@ -98,6 +144,7 @@ uv run voicevox-synthesize --input output/20260731_153000/voicevox_script.txt
 | `output/<実行時刻>/backgrounds/` | （背景生成有効時）Geminiで生成した背景イラストの元画像 |
 | `output/<実行時刻>/description.txt` | YouTube概要欄用テキスト（概要文・目次・元記事リンク・ハッシュタグ） |
 | `output/<実行時刻>/audio/` | （`voicevox-synthesize`実行後）セリフごとのWAV音声+manifest.json |
+| `output/<実行時刻>/final_video.mp4` | （`render-video`実行後）色分け字幕つきの完成動画 |
 
 ## 構成
 
@@ -107,16 +154,19 @@ video_pipeline/
 ├── claude_client.py      # Claude API呼び出しの共通処理（テキスト/JSON）
 ├── image_generator.py    # Gemini(Nano Banana系)によるスライド背景生成
 ├── voicevox_client.py     # ローカルVOICEVOX ENGINEのHTTP APIクライアント
+├── script_parser.py       # script.mdをシーン・セリフに決定的にパース(正規表現)
+├── video_assembler.py     # 台本+スライド+音声から字幕付き動画をffmpegで組み立て
 ├── io_utils.py            # ファイル入出力
 ├── loop.py                # 生成→評価→修正ループの共通ロジック
 ├── slide_image_builder.py # スライド内容(JSON、4レイアウト対応) -> PNG画像(Pillowで直接描画)
-├── assets/fonts/          # Noto Sans JP(同梱フォント。OS依存を避けるため)
+├── assets/fonts/          # Noto Sans JP(スライド用:可変フォント、字幕用:静的Bold/Regular)
 ├── pipeline.py            # 全体のオーケストレーション
 ├── main.py                # CLIエントリーポイント(video-pipeline)
 ├── synthesize_audio.py    # CLIエントリーポイント(voicevox-synthesize)
+├── render_video.py        # CLIエントリーポイント(render-video)
 └── agents/
     ├── script_agent.py        # 台本の生成・評価・修正
-    ├── slides_agent.py        # スライド内容(background_prompt含む)の生成・評価・修正
+    ├── slides_agent.py        # スライド内容(background_prompt, scene_number含む)の生成・評価・修正
     ├── voicevox_agent.py      # VOICEVOX用テキストの生成・評価・修正
     ├── integration_agent.py   # 3つの横断的な整合性チェック
     └── description_agent.py   # YouTube概要欄（概要文・目次・リンク・タグ）の生成・評価・修正
@@ -187,3 +237,11 @@ Gemini APIの呼び出し回数・コストが動画1本あたりスライド枚
   パーサーは既知の話者名（つむぎ/ずんだもん）をもとに両方の形式に対応している
 - DaVinci Resolveでの編集・書き出しは対象外
   （ResolveのPython/Luaスクリプティングでタイムライン組み立てまで拡張する余地がある）
+- `render-video`はscript.mdの見出し形式「### シーン<N>：〜」とセリフ形式
+  「つむぎ「〜」」「ずんだもん「〜」」に強く依存する。script_agentのプロンプトが
+  変わってこの形式が崩れると、`script_parser.py`がセリフを抽出できなくなる
+- `render-video`実行時に生成される音声は`voicevox-synthesize`とは別経路
+  （scene_numberとの整合性を優先したため）。同じ台本に対して両方を実行すると
+  VOICEVOX ENGINEへの音声合成が二重に走る点は把握しておく
+- 1つのシーンに複数スライドが割り当てられている場合、表示時間は均等割りに
+  している（セリフの長さに応じた比例配分などはしていない）

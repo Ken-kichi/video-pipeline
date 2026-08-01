@@ -15,6 +15,7 @@ dependencies = [
 [project.scripts]
 video-pipeline = "video_pipeline.main:main"
 voicevox-synthesize = "video_pipeline.synthesize_audio:main"
+render-video = "video_pipeline.render_video:main"
 
 [build-system]
 requires = ["hatchling"]

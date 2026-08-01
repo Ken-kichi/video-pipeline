@@ -8,8 +8,10 @@
 - comparison:  2つの対象を左右に並べて比較する
 
 どのレイアウトにも background_prompt（背景に敷く抽象イラストの生成プロンプト、
-文字・数字は含めない）を持たせる。実際のテキストは背景の上にPillowで正確に
-描画するため、背景画像に数値やコードの正確性を求める必要はない。
+文字・数字は含めない）と scene_number（台本のシーン番号。動画組み立て時に
+音声とスライドを対応させるための機械可読な値）を持たせる。実際のテキストは
+背景の上にPillowで正確に描画するため、背景画像に数値やコードの正確性を
+求める必要はない。
 """
 
 import json
@@ -28,20 +30,28 @@ NotebookLMのVideo Overviewのように、内容によってスライドのレ�
 最も内容に合うlayoutを1つ選んでください。
 
 ## layout: "bullets"（標準。箇条書きで説明する内容）
-{"layout": "bullets", "title": "...", "bullets": ["...", "..."], "notes": "...", "background_prompt": "..."}
+{"layout": "bullets", "scene_number": 1, "title": "...", "bullets": ["...", "..."], "notes": "...", "background_prompt": "..."}
 
 ## layout: "stat"（1つの具体的な数値・指標が主役のスライド。例: 精度の変化）
-{"layout": "stat", "title": "...", "stat_value": "0.79 -> 0.83", "stat_label": "特徴量追加後の精度変化", "notes": "...", "background_prompt": "..."}
+{"layout": "stat", "scene_number": 1, "title": "...", "stat_value": "0.79 -> 0.83", "stat_label": "特徴量追加後の精度変化", "notes": "...", "background_prompt": "..."}
 - stat_valueは記事に書かれている数値をそのまま使う(創作しない)
 - stat_valueは短く(20文字程度まで)。長い説明はstat_labelに書く
 
 ## layout: "quote"（1文のキーメッセージを強調したいスライド。例: まとめの核心）
-{"layout": "quote", "quote_text": "データが8割、モデルが2割", "quote_context": "...", "notes": "...", "background_prompt": "..."}
+{"layout": "quote", "scene_number": 1, "quote_text": "データが8割、モデルが2割", "quote_context": "...", "notes": "...", "background_prompt": "..."}
 - quote_textは短く力強い1文(20文字前後が目安)
 - quote_contextは補足の一言(無ければ空文字)
 
 ## layout: "comparison"（2つの対象を対比させたいスライド。例: 汎用AI vs 自前モデル）
-{"layout": "comparison", "title": "...", "left_label": "...", "left_bullets": ["...", "..."], "right_label": "...", "right_bullets": ["...", "..."], "notes": "...", "background_prompt": "..."}
+{"layout": "comparison", "scene_number": 1, "title": "...", "left_label": "...", "left_bullets": ["...", "..."], "right_label": "...", "right_bullets": ["...", "..."], "notes": "...", "background_prompt": "..."}
+
+scene_numberについて（重要）:
+- 台本の見出し「### シーン<N>：〜」の<N>の数字をそのまま入れる
+  （動画組み立て時に音声とスライドを対応させるために使う機械可読な値なので、
+  必ず台本のシーン番号と一致させる。自由な説明はnotesに書く）
+- 1つのシーンに複数のスライドを割り当てても構わない（同じscene_numberを
+  複数のスライドに使ってよい）が、シーンを飛ばしたり存在しない番号を
+  使ったりしないこと
 
 制約:
 - 台本のシーン区切り・【画面：〜】指示と対応する形でスライドを分割する
@@ -80,6 +90,8 @@ EVALUATE_SYSTEM = """あなたはスライド構成のレビュアーです。�
   無理に使っていないか、逆に強調すべき数値やキーメッセージがbulletsに埋もれて
   いないか）。"stat"/"quote"/"comparison"を使いすぎて散漫になっていないか
 - stat_valueが記事の数値と一致しているか（創作した数値になっていないか）
+- scene_numberが台本の実際のシーン番号と一致しているか（欠番・範囲外が
+  無いか。ここがズレると動画組み立て時に音声とスライドが対応しなくなる）
 - background_promptに文字・数字を描かせる指示が紛れ込んでいないか
   （紛れ込んでいたら減点対象）
 - background_promptがスライド内容と無関係になっていないか
@@ -89,7 +101,8 @@ JSON形式 {"score": <int>, "feedback": "<改善点。問題なければ空文�
 
 REVISE_SYSTEM = """あなたはスライド構成の修正担当です。フィードバックに基づいて
 スライド内容を修正してください。各スライドは"layout"フィールド
-("bullets"/"stat"/"quote"/"comparison"のいずれか)を持つ構造を維持してください。
+("bullets"/"stat"/"quote"/"comparison"のいずれか)と、台本のシーン番号と
+一致した"scene_number"(整数)を持つ構造を維持してください。
 出力はJSONのみ: {"slides": [<layoutに応じた形式のオブジェクト>, ...]}
 """
 
