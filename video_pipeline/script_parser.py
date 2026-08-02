@@ -61,7 +61,9 @@ def parse_script(script_text: str) -> list[Scene]:
         if dialogue_match and current_scene is not None:
             speaker, text = dialogue_match.groups()
             current_scene.lines.append(
-                ScriptLine(speaker=speaker, text=text, scene_number=current_scene.number)
+                ScriptLine(
+                    speaker=speaker, text=text, scene_number=current_scene.number
+                )
             )
 
     return scenes

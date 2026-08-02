@@ -94,16 +94,22 @@ def _fit_height(image_path: Path, target_height: int) -> Image.Image:
     return img.resize(new_size, Image.LANCZOS)
 
 
-def _cover_resize_crop(img: Image.Image, target_width: int, target_height: int) -> Image.Image:
+def _cover_resize_crop(
+    img: Image.Image, target_width: int, target_height: int
+) -> Image.Image:
     """アスペクト比を保ったまま指定サイズを覆うようにリサイズ+中央クロップする。"""
     scale = max(target_width / img.width, target_height / img.height)
-    resized = img.resize((int(img.width * scale) + 1, int(img.height * scale) + 1), Image.LANCZOS)
+    resized = img.resize(
+        (int(img.width * scale) + 1, int(img.height * scale) + 1), Image.LANCZOS
+    )
     left = (resized.width - target_width) // 2
     top = (resized.height - target_height) // 2
     return resized.crop((left, top, left + target_width, top + target_height))
 
 
-def build_gemini_thumbnail_prompt(main_text: str, sub_text: str, visual_summary: str = "") -> str:
+def build_gemini_thumbnail_prompt(
+    main_text: str, sub_text: str, visual_summary: str = ""
+) -> str:
     """Geminiにサムネイルを丸ごと生成させるためのプロンプトを組み立てる。
 
     main_text/sub_textだけを渡すと「文字+汎用的な背景」にしかならなかった
@@ -116,7 +122,9 @@ def build_gemini_thumbnail_prompt(main_text: str, sub_text: str, visual_summary:
         f'Prominently render this exact Japanese text as the large bold headline: "{main_text}"',
     ]
     if sub_text:
-        lines.append(f'Render this exact Japanese text smaller, as a subheading near it: "{sub_text}"')
+        lines.append(
+            f'Render this exact Japanese text smaller, as a subheading near it: "{sub_text}"'
+        )
     if visual_summary:
         lines.append(f"Content summary to base the illustration on: {visual_summary}")
     lines.append(
@@ -201,13 +209,20 @@ def build_thumbnail(
     main_font = _load_font(100)
     sub_font = _load_font(56)
 
-    def draw_outlined_centered(text: str, font: ImageFont.FreeTypeFont, y: int, fill: str) -> int:
+    def draw_outlined_centered(
+        text: str, font: ImageFont.FreeTypeFont, y: int, fill: str
+    ) -> int:
         if not text:
             return y
         width = draw.textlength(text, font=font)
         x = (THUMBNAIL_WIDTH - width) / 2
         draw.text(
-            (x, y), text, font=font, fill=fill, stroke_width=8, stroke_fill=TEXT_OUTLINE_COLOR
+            (x, y),
+            text,
+            font=font,
+            fill=fill,
+            stroke_width=8,
+            stroke_fill=TEXT_OUTLINE_COLOR,
         )
         return y + int(font.size * 1.25)
 

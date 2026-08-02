@@ -27,7 +27,10 @@ from video_pipeline.agents import thumbnail_agent
 from video_pipeline.config import GENERATE_SLIDE_IMAGES
 from video_pipeline.image_generator import generate_slide_background
 from video_pipeline.interactive import confirm, pick_output_run
-from video_pipeline.thumbnail_generator import build_thumbnail, generate_thumbnail_with_gemini
+from video_pipeline.thumbnail_generator import (
+    build_thumbnail,
+    generate_thumbnail_with_gemini,
+)
 
 
 def main() -> None:
@@ -74,7 +77,9 @@ def main() -> None:
     if not script_path.exists():
         raise FileNotFoundError(f"台本ファイルが見つかりません: {script_path}")
 
-    output_path = Path(args.output) if args.output else script_path.parent / "thumbnail.png"
+    output_path = (
+        Path(args.output) if args.output else script_path.parent / "thumbnail.png"
+    )
 
     generate_images = args.generate_images
     if generate_images is None:
@@ -102,7 +107,9 @@ def main() -> None:
             visual_summary=thumbnail_copy["visual_summary"],
         )
         if thumbnail_path is None:
-            print("  Geminiでの生成に失敗したため、Pillowでの組み立てにフォールバックします")
+            print(
+                "  Geminiでの生成に失敗したため、Pillowでの組み立てにフォールバックします"
+            )
 
     if thumbnail_path is None:
         background_path = None

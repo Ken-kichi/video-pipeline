@@ -68,7 +68,9 @@ def resolve_speaker_id(
             return style["id"]
     if styles:
         return styles[0]["id"]
-    raise ValueError(f"話者「{matched_speaker.get('name')}」にスタイルが登録されていません")
+    raise ValueError(
+        f"話者「{matched_speaker.get('name')}」にスタイルが登録されていません"
+    )
 
 
 # 字幕には残したいが読み上げには不要な、非言語的な表現。カッコの中に
@@ -198,7 +200,12 @@ def synthesize_script_file(
         path.write_bytes(wav_bytes)
         paths.append(path)
         manifest.append(
-            {"index": i, "speaker": character_name, "text": line_text, "file": path.name}
+            {
+                "index": i,
+                "speaker": character_name,
+                "text": line_text,
+                "file": path.name,
+            }
         )
 
     manifest_path = output_dir / "manifest.json"

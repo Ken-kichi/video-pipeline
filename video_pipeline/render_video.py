@@ -40,7 +40,9 @@ def main() -> None:
         description="script.md・スライド・VOICEVOX音声から字幕付き動画を組み立てる"
     )
     parser.add_argument(
-        "--script", default=None, help="script.mdのパス(省略時は対話選択したディレクトリ内のもの)"
+        "--script",
+        default=None,
+        help="script.mdのパス(省略時は対話選択したディレクトリ内のもの)",
     )
     parser.add_argument(
         "--slides-dir",
@@ -48,7 +50,9 @@ def main() -> None:
         help="スライド画像ディレクトリ(manifest.jsonを含む。省略時は対話選択したディレクトリ内のもの)",
     )
     parser.add_argument(
-        "--output", default=None, help="出力する動画ファイルのパス(.mp4、省略時は対話選択したディレクトリ内)"
+        "--output",
+        default=None,
+        help="出力する動画ファイルのパス(.mp4、省略時は対話選択したディレクトリ内)",
     )
     parser.add_argument(
         "--thumbnail",
@@ -114,7 +118,11 @@ def main() -> None:
 
     thumbnail_path = None
     if not args.no_thumbnail_intro:
-        thumbnail_path = Path(args.thumbnail) if args.thumbnail else script_path.parent / "thumbnail.png"
+        thumbnail_path = (
+            Path(args.thumbnail)
+            if args.thumbnail
+            else script_path.parent / "thumbnail.png"
+        )
         if not thumbnail_path.exists():
             thumbnail_path = None
         else:

@@ -52,7 +52,9 @@ def main() -> None:
 
     base_url = resolve_base_url(args.base_url, DEFAULT_BASE_URL)
     voicevox_text = input_path.read_text(encoding="utf-8")
-    output_dir = Path(args.output_dir) if args.output_dir else input_path.parent / "audio"
+    output_dir = (
+        Path(args.output_dir) if args.output_dir else input_path.parent / "audio"
+    )
 
     print(f"VOICEVOX ENGINE ({base_url}) に接続して音声を生成します...")
     try:

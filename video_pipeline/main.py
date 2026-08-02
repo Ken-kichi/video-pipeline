@@ -11,7 +11,12 @@ import argparse
 from dotenv import load_dotenv
 
 from video_pipeline.config import GENERATE_SLIDE_IMAGES as DEFAULT_GENERATE_IMAGES
-from video_pipeline.interactive import confirm, pick_article, select_from_list, text_input
+from video_pipeline.interactive import (
+    confirm,
+    pick_article,
+    select_from_list,
+    text_input,
+)
 from video_pipeline.pipeline import run_pipeline
 
 
@@ -25,7 +30,9 @@ def _resolve_title(cli_title: str | None) -> str | None:
     )
     if choice == "自分でタイトルを入力する":
         return text_input("タイトルを入力してください:")
-    return None  # 自動検出(pipeline側の既定動作)。非対話環境でもこのフォールバックになる
+    return (
+        None  # 自動検出(pipeline側の既定動作)。非対話環境でもこのフォールバックになる
+    )
 
 
 def _resolve_article_url(cli_url: str | None) -> str | None:
@@ -62,7 +69,11 @@ def main() -> None:
         default=None,
         help="入力Markdown記事のパス。省略するとarticles/*.mdから対話的に選べる",
     )
-    parser.add_argument("--output-dir", default="output", help="出力先ディレクトリ（デフォルト: output）")
+    parser.add_argument(
+        "--output-dir",
+        default="output",
+        help="出力先ディレクトリ（デフォルト: output）",
+    )
     parser.add_argument(
         "--title",
         default=None,

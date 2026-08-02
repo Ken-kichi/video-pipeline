@@ -81,8 +81,13 @@ def build_credits_block(
     config.TSUMUGI_ILLUSTRATOR_CREDIT等で明示的に設定してもらう必要がある。
     未設定の場合はプレースホルダーを入れる(投稿前に必ず差し替えること)。
     """
-    tsumugi_illust = tsumugi_credit or "（つむぎ立ち絵のイラストクレジットをここに入れてください）"
-    zundamon_illust = zundamon_credit or "（ずんだもん立ち絵のイラストクレジットをここに入れてください）"
+    tsumugi_illust = (
+        tsumugi_credit or "（つむぎ立ち絵のイラストクレジットをここに入れてください）"
+    )
+    zundamon_illust = (
+        zundamon_credit
+        or "（ずんだもん立ち絵のイラストクレジットをここに入れてください）"
+    )
 
     return (
         "【クレジット】\n"

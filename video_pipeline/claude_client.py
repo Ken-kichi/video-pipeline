@@ -96,8 +96,7 @@ def call_json(
     別途トークン上限を増やして対処される)。
     """
     full_system = (
-        system
-        + "\n\n重要: 出力はJSONオブジェクトのみとすること。"
+        system + "\n\n重要: 出力はJSONオブジェクトのみとすること。"
         "前置き・説明文・コードフェンス(```)は一切含めないこと。"
     )
     current_user = user
@@ -115,4 +114,6 @@ def call_json(
                 f"{user}\n\n直前の出力はJSONとしてパースできませんでした:\n{raw}\n"
                 "JSONオブジェクトのみを出力してください。"
             )
-    raise ValueError(f"ClaudeからのJSON応答のパースに失敗しました。最終応答:\n{last_raw}")
+    raise ValueError(
+        f"ClaudeからのJSON応答のパースに失敗しました。最終応答:\n{last_raw}"
+    )

@@ -15,8 +15,12 @@ from pygments.token import Token
 
 # コード表示に使う等幅フォント。日本語コメントが含まれる可能性もあるため、
 # 等幅フォントに日本語グリフが無い文字はNoto Sans JPで補う簡易フォールバックにする。
-_MONO_FONT_PATH = Path(__file__).parent / "assets" / "fonts" / "JetBrainsMono-Regular.ttf"
-_JP_FALLBACK_FONT_PATH = Path(__file__).parent / "assets" / "fonts" / "NotoSansJP-Regular.otf"
+_MONO_FONT_PATH = (
+    Path(__file__).parent / "assets" / "fonts" / "JetBrainsMono-Regular.ttf"
+)
+_JP_FALLBACK_FONT_PATH = (
+    Path(__file__).parent / "assets" / "fonts" / "NotoSansJP-Regular.otf"
+)
 
 CODE_FONT_SIZE = 30
 CODE_LINE_SPACING = 1.35
@@ -54,7 +58,9 @@ def _load_jp_font(size: int) -> ImageFont.FreeTypeFont:
     return ImageFont.truetype(str(_JP_FALLBACK_FONT_PATH), size)
 
 
-def _char_font(ch: str, mono_font: ImageFont.FreeTypeFont, jp_font: ImageFont.FreeTypeFont) -> ImageFont.FreeTypeFont:
+def _char_font(
+    ch: str, mono_font: ImageFont.FreeTypeFont, jp_font: ImageFont.FreeTypeFont
+) -> ImageFont.FreeTypeFont:
     """半角文字は等幅フォント、日本語などは同サイズのNoto Sans JPで描く。"""
     return mono_font if ord(ch) < 0x3000 else jp_font
 

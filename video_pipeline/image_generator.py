@@ -49,7 +49,9 @@ def generate_slide_image(
         from google import genai
         from google.genai import types
     except ImportError:
-        print("  [警告] google-genaiがインストールされていないため画像生成をスキップします")
+        print(
+            "  [警告] google-genaiがインストールされていないため画像生成をスキップします"
+        )
         return None
 
     try:
@@ -76,7 +78,9 @@ def generate_slide_image(
     return None
 
 
-def generate_slide_background(content_prompt: str, output_path: str | Path) -> Path | None:
+def generate_slide_background(
+    content_prompt: str, output_path: str | Path
+) -> Path | None:
     """スライド背景を生成する。全スライド共通のスタイルを自動で付け足す。"""
     full_prompt = content_prompt.strip() + BACKGROUND_STYLE_SUFFIX
     return generate_slide_image(full_prompt, output_path, aspect_ratio="16:9")

@@ -28,7 +28,9 @@ class DiagramBlock:
     heading_context: str
 
 
-def extract_article_assets(article_text: str) -> tuple[list[CodeBlock], list[DiagramBlock]]:
+def extract_article_assets(
+    article_text: str,
+) -> tuple[list[CodeBlock], list[DiagramBlock]]:
     """記事からコードブロックとmermaid図をそれぞれ抜き出す。
 
     mermaid図(```mermaid)はdiagramsに、それ以外の言語のコードブロックは
@@ -49,7 +51,11 @@ def extract_article_assets(article_text: str) -> tuple[list[CodeBlock], list[Dia
                 current_heading = heading_match.group(2)
                 continue
 
-        fence_match = _FENCE_RE.match(raw_line.strip()) if raw_line.strip().startswith("```") else None
+        fence_match = (
+            _FENCE_RE.match(raw_line.strip())
+            if raw_line.strip().startswith("```")
+            else None
+        )
 
         if not in_fence and fence_match:
             in_fence = True
@@ -63,7 +69,9 @@ def extract_article_assets(article_text: str) -> tuple[list[CodeBlock], list[Dia
             if fence_lang == "mermaid":
                 diagrams.append(
                     DiagramBlock(
-                        index=len(diagrams), mermaid_source=code_text, heading_context=current_heading
+                        index=len(diagrams),
+                        mermaid_source=code_text,
+                        heading_context=current_heading,
                     )
                 )
             else:
@@ -83,7 +91,9 @@ def extract_article_assets(article_text: str) -> tuple[list[CodeBlock], list[Dia
     return codes, diagrams
 
 
-def summarize_for_prompt(codes: list[CodeBlock], diagrams: list[DiagramBlock], max_chars: int = 120) -> str:
+def summarize_for_prompt(
+    codes: list[CodeBlock], diagrams: list[DiagramBlock], max_chars: int = 120
+) -> str:
     """slides_agentのプロンプトに埋め込む、コード/図の一覧サマリーを作る。"""
     lines: list[str] = []
 
@@ -91,12 +101,16 @@ def summarize_for_prompt(codes: list[CodeBlock], diagrams: list[DiagramBlock], m
         lines.append("## 記事中のコードブロック一覧(code_refで参照)")
         for c in codes:
             preview = c.code.strip().replace("\n", " ")[:max_chars]
-            lines.append(f"- code_ref={c.index} [{c.language}] (「{c.heading_context}」節) {preview}...")
+            lines.append(
+                f"- code_ref={c.index} [{c.language}] (「{c.heading_context}」節) {preview}..."
+            )
 
     if diagrams:
         lines.append("## 記事中のmermaid図一覧(diagram_refで参照)")
         for d in diagrams:
             preview = d.mermaid_source.strip().replace("\n", " ")[:max_chars]
-            lines.append(f"- diagram_ref={d.index} (「{d.heading_context}」節) {preview}...")
+            lines.append(
+                f"- diagram_ref={d.index} (「{d.heading_context}」節) {preview}..."
+            )
 
     return "\n".join(lines)

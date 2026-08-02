@@ -34,13 +34,21 @@ def main() -> None:
     parser = argparse.ArgumentParser(
         description="立ち絵PSDから口の開閉2状態のPNGをassets/characters/に書き出す"
     )
-    parser.add_argument("--tsumugi-psd", default=None, help="つむぎの立ち絵素材PSDのパス")
-    parser.add_argument("--zundamon-psd", default=None, help="ずんだもんの立ち絵素材PSDのパス")
     parser.add_argument(
-        "--tsumugi-mouth-group", default=DEFAULT_MOUTH_GROUP, help="つむぎの口レイヤーグループ名"
+        "--tsumugi-psd", default=None, help="つむぎの立ち絵素材PSDのパス"
     )
     parser.add_argument(
-        "--zundamon-mouth-group", default=DEFAULT_MOUTH_GROUP, help="ずんだもんの口レイヤーグループ名"
+        "--zundamon-psd", default=None, help="ずんだもんの立ち絵素材PSDのパス"
+    )
+    parser.add_argument(
+        "--tsumugi-mouth-group",
+        default=DEFAULT_MOUTH_GROUP,
+        help="つむぎの口レイヤーグループ名",
+    )
+    parser.add_argument(
+        "--zundamon-mouth-group",
+        default=DEFAULT_MOUTH_GROUP,
+        help="ずんだもんの口レイヤーグループ名",
     )
     parser.add_argument(
         "--tsumugi-mouth-closed",
@@ -65,7 +73,13 @@ def main() -> None:
     args = parser.parse_args()
 
     jobs = [
-        ("つむぎ", args.tsumugi_psd, args.tsumugi_mouth_group, args.tsumugi_mouth_closed, args.tsumugi_mouth_open),
+        (
+            "つむぎ",
+            args.tsumugi_psd,
+            args.tsumugi_mouth_group,
+            args.tsumugi_mouth_closed,
+            args.tsumugi_mouth_open,
+        ),
         (
             "ずんだもん",
             args.zundamon_psd,
@@ -80,8 +94,10 @@ def main() -> None:
         if not psd_path:
             continue
         prefix = CHARACTER_PREFIXES[speaker]
-        print(f"{speaker}: {psd_path} から口レイヤー「{mouth_group}」の"
-              f"「{closed_name}」「{open_name}」を書き出します...")
+        print(
+            f"{speaker}: {psd_path} から口レイヤー「{mouth_group}」の"
+            f"「{closed_name}」「{open_name}」を書き出します..."
+        )
         try:
             result = render_character_states(
                 psd_path=psd_path,
@@ -107,8 +123,10 @@ def main() -> None:
             "--tsumugi-psdまたは--zundamon-psdのどちらか(または両方)を指定してください。"
         )
 
-    print(f"\n完了。{CHARACTER_ASSETS_DIR} に保存しました。"
-          "render-video実行時に自動的に読み込まれます。")
+    print(
+        f"\n完了。{CHARACTER_ASSETS_DIR} に保存しました。"
+        "render-video実行時に自動的に読み込まれます。"
+    )
 
 
 if __name__ == "__main__":

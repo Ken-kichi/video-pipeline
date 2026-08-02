@@ -57,7 +57,9 @@ def _load_font(size: int, weight: int = 400) -> ImageFont.FreeTypeFont:
     return font
 
 
-def _wrap_text(draw: ImageDraw.ImageDraw, text: str, font: ImageFont.FreeTypeFont, max_width: int) -> list[str]:
+def _wrap_text(
+    draw: ImageDraw.ImageDraw, text: str, font: ImageFont.FreeTypeFont, max_width: int
+) -> list[str]:
     """日本語向けに1文字ずつ幅を測って折り返す簡易ワードラップ。"""
     lines: list[str] = []
     current = ""
@@ -162,7 +164,10 @@ def _draw_footer(draw: ImageDraw.ImageDraw, slide_number: int) -> None:
 
 
 def build_title_slide(
-    title: str, subtitle: str, output_path: str | Path, background_path: str | None = None
+    title: str,
+    subtitle: str,
+    output_path: str | Path,
+    background_path: str | None = None,
 ) -> Path:
     """表紙スライドを生成する。"""
     img = _make_base_canvas({"background_path": background_path}, BG_COLOR)
@@ -177,7 +182,9 @@ def build_title_slide(
     subtitle_lines = _wrap_text(draw, subtitle, subtitle_font, SLIDE_WIDTH - MARGIN * 2)
 
     total_height = (
-        _block_height(title_lines, title_font) + 40 + _block_height(subtitle_lines, subtitle_font)
+        _block_height(title_lines, title_font)
+        + 40
+        + _block_height(subtitle_lines, subtitle_font)
     )
 
     y = (SLIDE_HEIGHT - total_height) // 2
@@ -191,13 +198,17 @@ def build_title_slide(
     return output_path
 
 
-def _render_bullets(img: Image.Image, draw: ImageDraw.ImageDraw, slide_data: dict) -> None:
+def _render_bullets(
+    img: Image.Image, draw: ImageDraw.ImageDraw, slide_data: dict
+) -> None:
     """タイトル+箇条書き(標準レイアウト)。"""
     title_font = _load_font(56, weight=700)
     body_font = _load_font(38, weight=400)
     body_max_width = SLIDE_WIDTH - MARGIN * 2
 
-    title_lines = _wrap_text(draw, slide_data.get("title", ""), title_font, body_max_width)
+    title_lines = _wrap_text(
+        draw, slide_data.get("title", ""), title_font, body_max_width
+    )
     y = 90
     y = _draw_lines(draw, title_lines, title_font, MARGIN, y, TITLE_COLOR)
 
@@ -221,7 +232,9 @@ def _render_stat(img: Image.Image, draw: ImageDraw.ImageDraw, slide_data: dict) 
     if title:
         title_font = _load_font(40, weight=700)
         title_lines = _wrap_text(draw, title, title_font, SLIDE_WIDTH - MARGIN * 2)
-        _draw_lines_centered(draw, title_lines, title_font, SLIDE_WIDTH // 2, 110, SUBTITLE_COLOR)
+        _draw_lines_centered(
+            draw, title_lines, title_font, SLIDE_WIDTH // 2, 110, SUBTITLE_COLOR
+        )
 
     # 背景が無い場合のみ淡いアクセント帯を敷く(背景画像がある場合はスクリムと
     # 重ねると濃淡が二重になるため省略する)
@@ -239,10 +252,19 @@ def _render_stat(img: Image.Image, draw: ImageDraw.ImageDraw, slide_data: dict) 
     if stat_label:
         label_font = _load_font(34, weight=400)
         label_lines = _wrap_text(draw, stat_label, label_font, SLIDE_WIDTH - MARGIN * 2)
-        _draw_lines_centered(draw, label_lines, label_font, SLIDE_WIDTH // 2, band_bottom + 50, BODY_COLOR)
+        _draw_lines_centered(
+            draw,
+            label_lines,
+            label_font,
+            SLIDE_WIDTH // 2,
+            band_bottom + 50,
+            BODY_COLOR,
+        )
 
 
-def _render_quote(img: Image.Image, draw: ImageDraw.ImageDraw, slide_data: dict) -> None:
+def _render_quote(
+    img: Image.Image, draw: ImageDraw.ImageDraw, slide_data: dict
+) -> None:
     """1文のキーメッセージを画面中央に大きく見せるレイアウト。"""
     quote_text = slide_data.get("quote_text", "")
     quote_context = slide_data.get("quote_context", "")
@@ -254,31 +276,47 @@ def _render_quote(img: Image.Image, draw: ImageDraw.ImageDraw, slide_data: dict)
     quote_font = _load_font(88, weight=700)
     quote_lines = _wrap_text(draw, quote_text, quote_font, SLIDE_WIDTH - MARGIN * 2)
     context_font = _load_font(32, weight=400)
-    context_lines = _wrap_text(draw, quote_context, context_font, SLIDE_WIDTH - MARGIN * 2) if quote_context else []
+    context_lines = (
+        _wrap_text(draw, quote_context, context_font, SLIDE_WIDTH - MARGIN * 2)
+        if quote_context
+        else []
+    )
 
     total_height = _block_height(quote_lines, quote_font)
     if context_lines:
         total_height += 40 + _block_height(context_lines, context_font)
 
     y = (SLIDE_HEIGHT - total_height) // 2
-    y = _draw_lines_centered(draw, quote_lines, quote_font, SLIDE_WIDTH // 2, y, TITLE_COLOR)
+    y = _draw_lines_centered(
+        draw, quote_lines, quote_font, SLIDE_WIDTH // 2, y, TITLE_COLOR
+    )
     if context_lines:
         y += 40
-        _draw_lines_centered(draw, context_lines, context_font, SLIDE_WIDTH // 2, y, SUBTITLE_COLOR)
+        _draw_lines_centered(
+            draw, context_lines, context_font, SLIDE_WIDTH // 2, y, SUBTITLE_COLOR
+        )
 
 
-def _render_comparison(img: Image.Image, draw: ImageDraw.ImageDraw, slide_data: dict) -> None:
+def _render_comparison(
+    img: Image.Image, draw: ImageDraw.ImageDraw, slide_data: dict
+) -> None:
     """2つの対象を左右に並べて比較するレイアウト。"""
     title_font = _load_font(56, weight=700)
     label_font = _load_font(40, weight=700)
     body_font = _load_font(34, weight=400)
 
-    title_lines = _wrap_text(draw, slide_data.get("title", ""), title_font, SLIDE_WIDTH - MARGIN * 2)
+    title_lines = _wrap_text(
+        draw, slide_data.get("title", ""), title_font, SLIDE_WIDTH - MARGIN * 2
+    )
     y_title = 90
-    y_after_title = _draw_lines(draw, title_lines, title_font, MARGIN, y_title, TITLE_COLOR)
+    y_after_title = _draw_lines(
+        draw, title_lines, title_font, MARGIN, y_title, TITLE_COLOR
+    )
     y_after_title += 20
     draw.line(
-        [(MARGIN, y_after_title), (SLIDE_WIDTH - MARGIN, y_after_title)], fill=ACCENT_COLOR, width=4
+        [(MARGIN, y_after_title), (SLIDE_WIDTH - MARGIN, y_after_title)],
+        fill=ACCENT_COLOR,
+        width=4,
     )
 
     content_top = y_after_title + 60
@@ -287,14 +325,20 @@ def _render_comparison(img: Image.Image, draw: ImageDraw.ImageDraw, slide_data: 
     right_x = MARGIN + column_width + 80
     divider_x = SLIDE_WIDTH // 2
 
-    draw.line([(divider_x, content_top), (divider_x, SLIDE_HEIGHT - 120)], fill=ACCENT_COLOR_SOFT, width=3)
+    draw.line(
+        [(divider_x, content_top), (divider_x, SLIDE_HEIGHT - 120)],
+        fill=ACCENT_COLOR_SOFT,
+        width=3,
+    )
 
     for x, label_key, bullets_key in (
         (left_x, "left_label", "left_bullets"),
         (right_x, "right_label", "right_bullets"),
     ):
         y = content_top
-        label_lines = _wrap_text(draw, slide_data.get(label_key, ""), label_font, column_width)
+        label_lines = _wrap_text(
+            draw, slide_data.get(label_key, ""), label_font, column_width
+        )
         y = _draw_lines(draw, label_lines, label_font, x, y, ACCENT_COLOR)
         y += 20
         for bullet in slide_data.get(bullets_key, []):
@@ -310,7 +354,9 @@ def _render_media_layout(
     title_font = _load_font(48, weight=700)
     caption_font = _load_font(30, weight=400)
 
-    title_lines = _wrap_text(draw, slide_data.get("title", ""), title_font, SLIDE_WIDTH - MARGIN * 2)
+    title_lines = _wrap_text(
+        draw, slide_data.get("title", ""), title_font, SLIDE_WIDTH - MARGIN * 2
+    )
     y = 70
     y = _draw_lines(draw, title_lines, title_font, MARGIN, y, TITLE_COLOR)
     y += 20
@@ -339,13 +385,22 @@ def _render_media_layout(
         # 画像の解決に失敗した場合の簡易フォールバック表示
         placeholder_font = _load_font(30, weight=400)
         _draw_lines_centered(
-            draw, ["(画像を読み込めませんでした)"], placeholder_font, SLIDE_WIDTH // 2, y + 100, SUBTITLE_COLOR
+            draw,
+            ["(画像を読み込めませんでした)"],
+            placeholder_font,
+            SLIDE_WIDTH // 2,
+            y + 100,
+            SUBTITLE_COLOR,
         )
         y += 160
 
     if caption:
-        caption_lines = _wrap_text(draw, caption, caption_font, SLIDE_WIDTH - MARGIN * 2)
-        _draw_lines_centered(draw, caption_lines, caption_font, SLIDE_WIDTH // 2, y, BODY_COLOR)
+        caption_lines = _wrap_text(
+            draw, caption, caption_font, SLIDE_WIDTH - MARGIN * 2
+        )
+        _draw_lines_centered(
+            draw, caption_lines, caption_font, SLIDE_WIDTH // 2, y, BODY_COLOR
+        )
 
 
 def _render_code(img: Image.Image, draw: ImageDraw.ImageDraw, slide_data: dict) -> None:
@@ -353,7 +408,9 @@ def _render_code(img: Image.Image, draw: ImageDraw.ImageDraw, slide_data: dict) 
     _render_media_layout(img, draw, slide_data, "code_image_path")
 
 
-def _render_diagram(img: Image.Image, draw: ImageDraw.ImageDraw, slide_data: dict) -> None:
+def _render_diagram(
+    img: Image.Image, draw: ImageDraw.ImageDraw, slide_data: dict
+) -> None:
     """記事中の実際のmermaid図を表示するレイアウト。"""
     _render_media_layout(img, draw, slide_data, "diagram_image_path")
 
@@ -377,7 +434,9 @@ _LAYOUT_FALLBACK_COLOR = {
 }
 
 
-def build_content_slide(slide_data: dict, slide_number: int, output_path: str | Path) -> Path:
+def build_content_slide(
+    slide_data: dict, slide_number: int, output_path: str | Path
+) -> Path:
     """本編の1スライドを生成する。layoutフィールドに応じて描画方法を切り替える。
 
     background_pathが設定されていれば、その画像+スクリムを土台にして
@@ -403,7 +462,10 @@ def build_content_slide(slide_data: dict, slide_number: int, output_path: str | 
 
 
 def build_slide_images(
-    title: str, slides: list[dict], output_dir: str | Path, title_background_path: str | None = None
+    title: str,
+    slides: list[dict],
+    output_dir: str | Path,
+    title_background_path: str | None = None,
 ) -> list[Path]:
     """表紙+各スライドをPNGとして書き出し、生成したファイルパスの一覧を返す。
 

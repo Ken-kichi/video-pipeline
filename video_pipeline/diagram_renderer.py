@@ -24,7 +24,9 @@ def render_mermaid_diagram(mermaid_source: str, output_path: str, timeout: int =
     from pathlib import Path
 
     try:
-        encoded = base64.urlsafe_b64encode(mermaid_source.encode("utf-8")).decode("ascii")
+        encoded = base64.urlsafe_b64encode(mermaid_source.encode("utf-8")).decode(
+            "ascii"
+        )
         url = f"{MERMAID_INK_BASE_URL}/{encoded}?bgColor=white"
         response = requests.get(url, timeout=timeout)
         response.raise_for_status()

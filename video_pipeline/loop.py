@@ -46,7 +46,9 @@ def run_with_evaluation_loop(
         if score >= SCORE_THRESHOLD:
             break
         if attempt == MAX_REVISION_LOOPS:
-            print(f"  [{label}] ループ上限({MAX_REVISION_LOOPS}回)に到達。最高スコア案を採用します。")
+            print(
+                f"  [{label}] ループ上限({MAX_REVISION_LOOPS}回)に到達。最高スコア案を採用します。"
+            )
             break
 
         output = revise(output, feedback)

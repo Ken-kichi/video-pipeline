@@ -134,7 +134,9 @@ def _build_enable_expr(intervals: list[tuple[float, float]]) -> str:
     return "+".join(f"between(t,{start:.3f},{end:.3f})" for start, end in intervals)
 
 
-def _write_silence_wav(path: Path, duration_seconds: float, reference_wav_path: Path) -> Path:
+def _write_silence_wav(
+    path: Path, duration_seconds: float, reference_wav_path: Path
+) -> Path:
     """reference_wav_pathと同じフォーマット(サンプルレート等)の無音WAVを作る。
 
     音声結合はffmpegの`-c copy`(再エンコード無し)で行うため、無音クリップも
@@ -231,22 +233,30 @@ def synthesize_timeline(
     for i, line in enumerate(all_lines):
         if line.speaker not in speaker_id_cache:
             style_name = style_map.get(line.speaker, DEFAULT_STYLE_NAME)
-            speaker_id_cache[line.speaker] = resolve_speaker_id(speakers, line.speaker, style_name)
+            speaker_id_cache[line.speaker] = resolve_speaker_id(
+                speakers, line.speaker, style_name
+            )
         speaker_id = speaker_id_cache[line.speaker]
 
         index = i + 1
         # 話者+セリフ本文のハッシュでキャッシュする。同じscript.mdに対して
         # render-videoを何度も再実行しても(ffmpeg側の試行錯誤などで)、
         # 内容が変わっていないセリフはVOICEVOXへの再合成をスキップする。
-        cache_key = hashlib.sha256(f"{speaker_id}:{line.text}".encode("utf-8")).hexdigest()[:16]
+        cache_key = hashlib.sha256(
+            f"{speaker_id}:{line.text}".encode("utf-8")
+        ).hexdigest()[:16]
         cached_path = cache_dir / f"{cache_key}.wav"
         audio_path = work_dir / f"line_{index:04d}.wav"
 
         if cached_path.exists():
-            print(f"  {index:03d}: [シーン{line.scene_number}/{line.speaker}] {line.text[:30]}... (キャッシュ利用)")
+            print(
+                f"  {index:03d}: [シーン{line.scene_number}/{line.speaker}] {line.text[:30]}... (キャッシュ利用)"
+            )
             audio_path.write_bytes(cached_path.read_bytes())
         else:
-            print(f"  {index:03d}: [シーン{line.scene_number}/{line.speaker}] {line.text[:30]}...")
+            print(
+                f"  {index:03d}: [シーン{line.scene_number}/{line.speaker}] {line.text[:30]}..."
+            )
             wav_bytes = synthesize(line.text, speaker_id, base_url)
             cached_path.write_bytes(wav_bytes)
             audio_path.write_bytes(wav_bytes)
@@ -276,7 +286,9 @@ def synthesize_timeline(
 
     if reference_audio_path is not None:
         title_silence_path = work_dir / "title_silence.wav"
-        _write_silence_wav(title_silence_path, TITLE_SLIDE_DURATION_SECONDS, reference_audio_path)
+        _write_silence_wav(
+            title_silence_path, TITLE_SLIDE_DURATION_SECONDS, reference_audio_path
+        )
         audio_segments.insert(0, title_silence_path)
 
     return timeline, audio_segments
@@ -289,7 +301,9 @@ def _get_subtitle_measure_font() -> ImageFont.FreeTypeFont:
     """字幕の折り返し判定に使うフォントを読み込む(実際に焼き込まれるBold体と同じもの)。"""
     global _subtitle_measure_font
     if _subtitle_measure_font is None:
-        _subtitle_measure_font = ImageFont.truetype(str(_SUBTITLE_FONT_PATH), SUBTITLE_FONT_SIZE)
+        _subtitle_measure_font = ImageFont.truetype(
+            str(_SUBTITLE_FONT_PATH), SUBTITLE_FONT_SIZE
+        )
     return _subtitle_measure_font
 
 
@@ -355,7 +369,9 @@ def _build_ass_subtitle(timeline: list[TimedLine], output_path: str | Path) -> P
 
     events = []
     for item in timeline:
-        style_name = item.speaker if item.speaker in SUBTITLE_STYLE_COLORS else "Default"
+        style_name = (
+            item.speaker if item.speaker in SUBTITLE_STYLE_COLORS else "Default"
+        )
         start = _format_ass_time(item.start)
         end = _format_ass_time(item.end)
         cleaned = item.text.replace("\n", " ").replace("{", "").replace("}", "")
@@ -412,14 +428,20 @@ def _build_visual_timeline(
     scene_duration: dict[int, float] = {}
     for i, scene_number in enumerate(ordered_scenes):
         start = scene_start[scene_number]
-        end = scene_start[ordered_scenes[i + 1]] if i + 1 < len(ordered_scenes) else final_end
+        end = (
+            scene_start[ordered_scenes[i + 1]]
+            if i + 1 < len(ordered_scenes)
+            else final_end
+        )
         scene_duration[scene_number] = end - start
 
     visual_timeline: list[tuple[Path, float]] = []
     if thumbnail_path and Path(thumbnail_path).exists():
         visual_timeline.append((Path(thumbnail_path), TITLE_SLIDE_DURATION_SECONDS))
     elif title_entry:
-        visual_timeline.append((slides_dir / title_entry["file"], TITLE_SLIDE_DURATION_SECONDS))
+        visual_timeline.append(
+            (slides_dir / title_entry["file"], TITLE_SLIDE_DURATION_SECONDS)
+        )
 
     for scene_number in ordered_scenes:
         total = scene_duration[scene_number]
@@ -441,7 +463,9 @@ def _build_visual_timeline(
     return visual_timeline
 
 
-def _compute_slide_transition_times(visual_timeline: list[tuple[Path, float]]) -> list[float]:
+def _compute_slide_transition_times(
+    visual_timeline: list[tuple[Path, float]],
+) -> list[float]:
     """スライドが切り替わる時刻(2番目以降の各要素の開始時刻)のリストを返す。
 
     先頭(タイトル/サムネイル区間)から最初の本編スライドへの切り替わりも
@@ -456,7 +480,9 @@ def _compute_slide_transition_times(visual_timeline: list[tuple[Path, float]]) -
     return times
 
 
-def _write_image_concat_file(entries: list[tuple[str, float]], output_path: Path) -> Path:
+def _write_image_concat_file(
+    entries: list[tuple[str, float]], output_path: Path
+) -> Path:
     """ffmpeg concat demuxer用の画像リストファイルを書き出す(duration指定あり)。
 
     entries: [(ファイルパス, 表示秒数), ...]
@@ -521,7 +547,9 @@ def assemble_video(
     script_text = script_path.read_text(encoding="utf-8")
 
     print("=== 音声合成中 ===")
-    timeline, audio_segments = synthesize_timeline(script_text, work_dir / "audio", style_map, base_url)
+    timeline, audio_segments = synthesize_timeline(
+        script_text, work_dir / "audio", style_map, base_url
+    )
 
     print("=== 字幕(ASS)を生成中 ===")
     ass_path = _build_ass_subtitle(timeline, work_dir / "captions.ass")
@@ -538,7 +566,9 @@ def assemble_video(
         thumb_img = thumb_img.resize((VIDEO_WIDTH, VIDEO_HEIGHT), Image.LANCZOS)
         thumb_img.save(resolved_thumbnail_path)
 
-    visual_timeline = _build_visual_timeline(timeline, slides_dir, resolved_thumbnail_path)
+    visual_timeline = _build_visual_timeline(
+        timeline, slides_dir, resolved_thumbnail_path
+    )
 
     print("=== 音声を結合中 ===")
     audio_concat_path = _write_audio_concat_file(
@@ -547,7 +577,17 @@ def assemble_video(
     )
     full_audio_path = work_dir / "full_audio.wav"
     _run_ffmpeg(
-        ["-f", "concat", "-safe", "0", "-i", str(audio_concat_path), "-c", "copy", str(full_audio_path)]
+        [
+            "-f",
+            "concat",
+            "-safe",
+            "0",
+            "-i",
+            str(audio_concat_path),
+            "-c",
+            "copy",
+            str(full_audio_path),
+        ]
     )
 
     print("=== スライド映像を生成中 ===")
@@ -558,11 +598,18 @@ def assemble_video(
     silent_video_path = work_dir / "silent_video.mp4"
     _run_ffmpeg(
         [
-            "-f", "concat", "-safe", "0", "-i", str(image_concat_path),
+            "-f",
+            "concat",
+            "-safe",
+            "0",
+            "-i",
+            str(image_concat_path),
             # サムネイル(1280x720)のように画像サイズが異なるものが混ざっても
             # 動画解像度に統一する(アスペクト比は同じ16:9なので歪みは出ない)
-            "-vf", f"scale={VIDEO_WIDTH}:{VIDEO_HEIGHT},fps={VIDEO_FPS},format=yuv420p",
-            "-r", str(VIDEO_FPS),
+            "-vf",
+            f"scale={VIDEO_WIDTH}:{VIDEO_HEIGHT},fps={VIDEO_FPS},format=yuv420p",
+            "-r",
+            str(VIDEO_FPS),
             str(silent_video_path),
         ]
     )
@@ -590,7 +637,9 @@ def assemble_video(
             else f"main_w-overlay_w-{CHARACTER_MARGIN_X}"
         )
         y_expr = "main_h-overlay_h"
-        intervals = [(item.start, item.end) for item in timeline if item.speaker == speaker]
+        intervals = [
+            (item.start, item.end) for item in timeline if item.speaker == speaker
+        ]
         enable_expr = _build_enable_expr(intervals)
         # サムネイルを冒頭に使う場合、サムネイル自体に既にキャラクターが
         # 描かれているため、その区間だけ動画側のオーバーレイ(常時表示の
@@ -643,9 +692,13 @@ def assemble_video(
         )
         audio_labels.append("bgm")
     elif bgm_path:
-        print(f"  [警告] BGMファイルが見つかりません: {bgm_path}（BGM無しで続行します）")
+        print(
+            f"  [警告] BGMファイルが見つかりません: {bgm_path}（BGM無しで続行します）"
+        )
 
-    transition_times = _compute_slide_transition_times(visual_timeline) if page_turn_sound else []
+    transition_times = (
+        _compute_slide_transition_times(visual_timeline) if page_turn_sound else []
+    )
     if transition_times and PAGE_TURN_SFX_PATH.exists():
         print(f"  ページめくり音を{len(transition_times)}箇所に合成します")
         ffmpeg_inputs += ["-i", str(PAGE_TURN_SFX_PATH)]
@@ -659,7 +712,9 @@ def assemble_video(
             )
         else:
             split_labels = "".join(f"[se{i}]" for i in range(len(transition_times)))
-            filter_stages.append(f"[{sfx_idx}:a]asplit={len(transition_times)}{split_labels}")
+            filter_stages.append(
+                f"[{sfx_idx}:a]asplit={len(transition_times)}{split_labels}"
+            )
             delayed_refs = []
             for i, t in enumerate(transition_times):
                 delay_ms = int(t * 1000)
@@ -684,10 +739,17 @@ def assemble_video(
     _run_ffmpeg(
         [
             *ffmpeg_inputs,
-            "-filter_complex", ";".join(filter_stages),
-            "-map", "[vout]", *audio_map_args,
-            "-c:v", "libx264", "-pix_fmt", "yuv420p",
-            "-c:a", "aac",
+            "-filter_complex",
+            ";".join(filter_stages),
+            "-map",
+            "[vout]",
+            *audio_map_args,
+            "-c:v",
+            "libx264",
+            "-pix_fmt",
+            "yuv420p",
+            "-c:a",
+            "aac",
             "-shortest",
             str(output_path),
         ]

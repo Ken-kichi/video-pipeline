@@ -165,7 +165,9 @@ def generate(article_text: str, script: str, asset_summary: str = "") -> list[di
     return result["slides"]
 
 
-def evaluate(article_text: str, script: str, slides: list[dict], asset_summary: str = "") -> dict:
+def evaluate(
+    article_text: str, script: str, slides: list[dict], asset_summary: str = ""
+) -> dict:
     asset_block = f"\n\n{asset_summary}\n" if asset_summary else ""
     user = (
         f"# 元記事\n\n{article_text}\n\n# 動画台本\n\n{script}\n{asset_block}\n"
@@ -174,7 +176,9 @@ def evaluate(article_text: str, script: str, slides: list[dict], asset_summary: 
     return call_json(EVALUATE_SYSTEM, user, model=MODEL_EVALUATE)
 
 
-def revise(script: str, slides: list[dict], feedback: str, asset_summary: str = "") -> list[dict]:
+def revise(
+    script: str, slides: list[dict], feedback: str, asset_summary: str = ""
+) -> list[dict]:
     asset_block = f"\n\n{asset_summary}\n" if asset_summary else ""
     user = (
         f"# 動画台本\n\n{script}\n{asset_block}\n# 現在のスライド内容\n\n{_slides_to_text(slides)}\n\n"
@@ -184,7 +188,9 @@ def revise(script: str, slides: list[dict], feedback: str, asset_summary: str = 
     return result["slides"]
 
 
-def run(article_text: str, script: str, asset_summary: str = "") -> tuple[list[dict], int, list[dict]]:
+def run(
+    article_text: str, script: str, asset_summary: str = ""
+) -> tuple[list[dict], int, list[dict]]:
     """スライド内容の生成→評価→修正ループを実行する。
 
     asset_summaryはarticle_assets.summarize_for_prompt()で作った、記事中の

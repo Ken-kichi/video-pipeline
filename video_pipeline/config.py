@@ -19,7 +19,7 @@ MODEL_EXTRACT = os.environ.get("CLAUDE_MODEL_EXTRACT", "claude-haiku-4-5-2025100
 MAX_REVISION_LOOPS = 3
 
 # このスコア(0-100)以上になったらループを打ち切って採用する
-SCORE_THRESHOLD = 90
+SCORE_THRESHOLD = 80
 
 # 応答の最大トークン数（台本・スライド内容など長文生成用）。
 # スライドが多い記事ではJSON全体が大きくなるため、余裕を持たせている。
@@ -34,12 +34,16 @@ GENERATE_SLIDE_IMAGES = os.environ.get("GENERATE_SLIDE_IMAGES", "0") == "1"
 # 使用するGemini画像生成モデル。
 # gemini-2.5-flash-image / gemini-3.1-flash-image-preview(Nano Banana 2, 安価) /
 # gemini-3-pro-image-preview(Nano Banana Pro, 高品質・文字精度が高いが高価)
-GEMINI_IMAGE_MODEL = os.environ.get("GEMINI_IMAGE_MODEL", "gemini-3.1-flash-image-preview")
+GEMINI_IMAGE_MODEL = os.environ.get(
+    "GEMINI_IMAGE_MODEL", "gemini-3.1-flash-image-preview"
+)
 
 # サムネイルは背景に文字を直接焼き込む(通常のスライド背景と違い文字精度が
 # 重要)ため、1本の動画につき1回だけの生成であることも踏まえ、デフォルトで
 # より文字精度の高い(高価な)モデルを使う
-GEMINI_THUMBNAIL_MODEL = os.environ.get("GEMINI_THUMBNAIL_MODEL", "gemini-3-pro-image-preview")
+GEMINI_THUMBNAIL_MODEL = os.environ.get(
+    "GEMINI_THUMBNAIL_MODEL", "gemini-3-pro-image-preview"
+)
 
 # 立ち絵イラストレーターのクレジット表記。PSDファイル自体からは著作者情報を
 # 読み取れないため、.envや環境変数で明示的に設定する必要がある

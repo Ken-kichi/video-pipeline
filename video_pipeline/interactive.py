@@ -70,7 +70,9 @@ def list_articles(articles_dir: str | Path = "articles") -> list[Path]:
     articles_dir = Path(articles_dir)
     if not articles_dir.exists():
         return []
-    files = sorted(articles_dir.glob("*.md"), key=lambda p: p.stat().st_mtime, reverse=True)
+    files = sorted(
+        articles_dir.glob("*.md"), key=lambda p: p.stat().st_mtime, reverse=True
+    )
     return files
 
 
