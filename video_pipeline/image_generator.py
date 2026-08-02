@@ -25,13 +25,20 @@ BACKGROUND_STYLE_SUFFIX = (
 
 
 def generate_slide_image(
-    prompt: str, output_path: str | Path, aspect_ratio: str = "16:9"
+    prompt: str,
+    output_path: str | Path,
+    aspect_ratio: str = "16:9",
+    model: str | None = None,
 ) -> Path | None:
     """promptから画像を生成しoutput_pathに保存する。生成できなければNoneを返す。
 
     GEMINI_API_KEYが未設定、またはAPI呼び出しに失敗した場合は例外を投げず
     Noneを返す(背景生成はあくまでオプションなので、失敗してもパイプライン
     全体を止めない方針)。
+
+    modelを指定しない場合はconfig.GEMINI_IMAGE_MODELを使う。サムネイルの
+    ように画像内に正確な文字を焼き込みたい用途では、文字精度の高い
+    (代わりに高価な)モデルを個別に指定できるようにしている。
     """
     api_key = os.environ.get("GEMINI_API_KEY")
     if not api_key:
@@ -48,7 +55,7 @@ def generate_slide_image(
     try:
         client = genai.Client(api_key=api_key)
         response = client.models.generate_content(
-            model=GEMINI_IMAGE_MODEL,
+            model=model or GEMINI_IMAGE_MODEL,
             contents=[prompt],
             config=types.GenerateContentConfig(
                 response_modalities=["Text", "Image"],

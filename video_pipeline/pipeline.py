@@ -15,6 +15,10 @@
      背景画像の絵柄に関わらず数値・専門用語の正確性は保たれる
   7. 台本(.md)・VOICEVOXテキスト(.txt)・スライド画像(.png)・概要欄(.txt)を保存する
      （.pptxは環境によって開けない事例があったため廃止し、直接PNGを書き出す）
+
+サムネイル生成は含まない（`generate_thumbnail.py`の`generate-thumbnail`コマンドに
+分離している。サムネイルだけ作り直したい時にエージェントを全部動かさずに
+済むようにするため）。
 """
 
 from datetime import datetime
@@ -25,7 +29,6 @@ from video_pipeline.agents import (
     integration_agent,
     script_agent,
     slides_agent,
-    thumbnail_agent,
     voicevox_agent,
 )
 from video_pipeline.article_assets import extract_article_assets, summarize_for_prompt
@@ -35,7 +38,6 @@ from video_pipeline.diagram_renderer import render_mermaid_diagram
 from video_pipeline.image_generator import generate_slide_background
 from video_pipeline.io_utils import extract_h1_title, read_markdown, write_text_file
 from video_pipeline.slide_image_builder import build_slide_images
-from video_pipeline.thumbnail_generator import build_thumbnail
 
 DEFAULT_ARTICLE_URL_PLACEHOLDER = "（ここに元記事のURLを貼ってください）"
 DEFAULT_VIDEO_TITLE = "解説動画"
@@ -209,21 +211,6 @@ def run_pipeline(
     description_path = write_text_file(output_dir_path / "description.txt", description)
     slide_image_paths = build_slide_images(video_title, slides, output_dir_path / "slides")
 
-    print("=== サムネイル生成 ===")
-    thumbnail_copy = thumbnail_agent.generate(script)
-    thumbnail_background_path = None
-    if generate_images:
-        thumbnail_background_path = generate_slide_background(
-            f"a wide 16:9 abstract illustration representing: {video_title}",
-            output_dir_path / "thumbnail_background.png",
-        )
-    thumbnail_path = build_thumbnail(
-        thumbnail_copy["main_text"],
-        thumbnail_copy["sub_text"],
-        output_dir_path / "thumbnail.png",
-        background_path=thumbnail_background_path,
-    )
-
     print("\n=== 完了 ===")
     print(f"出力先ディレクトリ: {output_dir_path}")
     print(
@@ -237,7 +224,7 @@ def run_pipeline(
     print(f"VOICEVOXテキスト: {voicevox_path}")
     print(f"スライド画像 : {output_dir_path / 'slides'}/ ({len(slide_image_paths)}枚)")
     print(f"概要欄       : {description_path}")
-    print(f"サムネイル   : {thumbnail_path}")
+    print(f"サムネイルが欲しい場合は: uv run generate-thumbnail")
 
     return {
         "output_dir": output_dir_path,
@@ -245,7 +232,6 @@ def run_pipeline(
         "voicevox_path": voicevox_path,
         "slide_image_paths": slide_image_paths,
         "description_path": description_path,
-        "thumbnail_path": thumbnail_path,
         "scores": {
             "script": script_score,
             "slides": slides_score,

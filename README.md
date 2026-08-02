@@ -2,41 +2,73 @@
 
 Markdown記事（Zenn記事など）から、VOICEVOX実況動画に必要な素材を半自動生成するパイプライン。
 
-```
-Markdown記事
-    │
-    ├─▶ 台本エージェント   (生成→評価→修正、最大3回、90点閾値)
-    │     └ 冒頭0:00〜1:00は概要・メリット訴求パート(単体でショート動画としても
-    │       成立する内容)、残り約9分が詳細解説パート、という構成で生成する
-    ├─▶ スライドエージェント (生成→評価→修正)   ※台本を参照
-    └─▶ VOICEVOXテキストエージェント (生成→評価→修正) ※台本を参照
-                    │
-                    ▼
-            総合エージェント（3つの整合性を採点。90点未満なら該当箇所を修正して再採点、最大3回）
-                    │
-                    ▼
-            概要欄エージェント（確定した台本から概要文・目次・元記事リンク・ハッシュタグを生成）
-                    │
-                    ▼
-     (任意) Geminiでスライド背景を生成し、その上に文字を重ねる ※GENERATE_SLIDE_IMAGES有効時のみ
-                    │
-                    ▼
-     output/20260731_153000/script.md
-     output/20260731_153000/voicevox_script.txt
-     output/20260731_153000/slides/slide_00_title.png, slide_01.png, ...
-     output/20260731_153000/description.txt
-     (実行するたびに output/<yyyymmdd_hhmmss>/ という新しいディレクトリに保存される)
+## クイックスタート
+
+初めて使う場合、上から順に実行すれば動画が完成する。
+
+```bash
+# 1. セットアップ(最初の1回だけ)
+uv sync
+cp .env.example .env
+# .env に ANTHROPIC_API_KEY を設定(必須)
+
+# 2. 記事から台本・スライド・概要欄などを生成
+uv run video-pipeline --input articles/sample.md
+
+# 3. (任意・最初の1回だけ) 立ち絵素材(PSD)があれば口パク用に準備しておく
+uv run prepare-characters --tsumugi-psd tsumugi.psd --zundamon-psd zundamon.psd
+
+# 4. (任意) サムネイルを生成(GEMINI_API_KEYがあれば背景・文字をGeminiが丸ごと生成)
+uv run generate-thumbnail
+
+# 5. VOICEVOXアプリを起動しておき、ffmpeg-fullをインストールしておく
+#    (brew install ffmpeg-full。詳細は「動画の自動組み立て」参照)
+
+# 6. 動画を組み立てる(手順2の出力ディレクトリを対話的に選べる)
+uv run render-video
 ```
 
-このあと先の作業:
-- **選択肢A: 完全自動で動画まで作る**
-  VOICEVOXアプリとffmpegを起動しておき、
-  `uv run render-video --script output/<実行時刻>/script.md --slides-dir output/<実行時刻>/slides --output output/<実行時刻>/final_video.mp4`
-  を実行すると、音声合成・スライド表示・話者ごとに色分けした字幕（つむぎ=黄色系、
-  ずんだもん=緑系）の焼き込みまで自動で行い、1本のmp4が完成する
-- **選択肢B: DaVinci Resolveで手動編集したい場合**
-  1. `uv run voicevox-synthesize --input output/<実行時刻>/voicevox_script.txt` でセリフごとのWAV音声を一括生成
-  2. `output/<実行時刻>/slides/` のPNG画像と生成した音声(WAV)を素材として、DaVinci Resolveのタイムラインに並べる
+`--input`や`--script`のようなパスは省略すると対話的に選べるので、
+2回目以降は各コマンドを引数無しで実行するだけでよい（詳細は「実行方法」参照）。
+
+手順6の代わりにDaVinci Resolveで手動編集したい場合は、
+`uv run voicevox-synthesize`で音声だけ生成し、`output/<実行時刻>/slides/`の
+PNG画像と合わせてタイムラインに並べる（詳細は「音声合成」参照）。
+
+完成したら、`output/<実行時刻>/final_video.mp4`と`thumbnail.png`をYouTubeに
+アップロードし、`description.txt`の内容を概要欄に貼る。**投稿前に必ず**
+`description.txt`内の元記事URL・立ち絵クレジットのプレースホルダーを
+実際の内容に差し替えること（詳細は「概要欄のクレジット表記について」参照）。
+
+## 全体の流れ
+
+まず`video-pipeline`が記事の内容（台本・スライド・概要欄など）をClaude APIで作る。
+そのあとサムネイル・立ち絵・動画本体は、それぞれ**独立したコマンド**で仕上げる
+（1つだけ作り直したい時に他のコマンドを巻き込まないようにするため）。
+
+```mermaid
+flowchart TD
+    Article["Markdown記事"] --> VP["<b>uv run video-pipeline</b><br/>台本→スライド→VOICEVOXテキスト→<br/>整合性チェック→概要欄"]
+    VP --> Out[("output/&lt;実行時刻&gt;/<br/>script.md, slides/, voicevox_script.txt,<br/>description.txt")]
+
+    Out --> GT["<b>uv run generate-thumbnail</b><br/>script.mdだけを読んでサムネイル生成"]
+    GT --> Thumb["thumbnail.png"]
+    Thumb -.同じディレクトリに保存.-> Out
+
+    PSD["立ち絵素材(PSD)"] --> PC["<b>uv run prepare-characters</b>"]
+    PC --> Assets["assets/characters/*.png<br/>(口の開閉2状態)"]
+
+    Out --> RV["<b>uv run render-video</b><br/>VOICEVOX ENGINE + ffmpeg"]
+    Assets -.あれば自動で使う.-> RV
+    Thumb -.あれば冒頭に使う.-> RV
+    RV --> Final["final_video.mp4<br/>(完全自動・字幕/立ち絵つき)"]
+
+    Out --> VS["<b>uv run voicevox-synthesize</b><br/>VOICEVOX ENGINEのみ"]
+    VS --> Wav["audio/*.wav<br/>(DaVinci Resolveで手動編集する場合)"]
+```
+
+- **完全自動で動画まで作る場合**: `render-video`だけで良い（`generate-images`/`prepare-characters`は任意）
+- **DaVinci Resolveで手動編集したい場合**: `voicevox-synthesize`で音声だけ作り、`slides/`のPNGと合わせてタイムラインに並べる
 
 いずれの場合も、完成した動画をYouTubeにアップロードし、`output/<実行時刻>/description.txt` の内容を概要欄に貼る
 （元記事URLをCLIで渡していない場合はプレースホルダーになっているので、実URLに差し替える）
@@ -49,9 +81,30 @@ cp .env.example .env
 # .env に ANTHROPIC_API_KEY を設定
 ```
 
+## `video-pipeline`内部のエージェント連携
+
+```mermaid
+flowchart TD
+    Article["記事"] --> Script["台本エージェント<br/>(生成→評価→修正、最大3回)"]
+    Article --> Slides
+    Script --> Slides["スライドエージェント<br/>(生成→評価→修正)"]
+    Script --> Voicevox["VOICEVOXテキストエージェント<br/>(生成→評価→修正)"]
+    Script --> Integration
+    Slides --> Integration["総合エージェント<br/>3つの整合性を採点"]
+    Voicevox --> Integration
+    Integration -->|90点未満なら該当箇所を修正| Script
+    Integration -->|90点未満なら該当箇所を修正| Slides
+    Integration -->|90点未満なら該当箇所を修正| Voicevox
+    Integration -->|90点以上| Description["概要欄エージェント<br/>(生成→評価→修正)"]
+```
+
+台本エージェントは、冒頭0:00〜1:00を単体でショート動画としても成立する
+「概要・メリット訴求パート」、残り約9分を詳細解説パートという構成で生成する。
+
 ## 実行方法
 
-3つのCLI（`video-pipeline` / `voicevox-synthesize` / `render-video`）は、
+5つのCLI（`video-pipeline` / `generate-thumbnail` / `prepare-characters` /
+`voicevox-synthesize` / `render-video`）は、
 引数（パス指定の`--input`/`--script`系だけでなく、`--title`・`--article-url`・
 `--generate-images`・`--base-url`のようなオプションも含む）を省略すると、
 対話端末上で矢印キー選択できるメニューが出る。「自動でよいか／自分で指定するか」
@@ -158,13 +211,34 @@ uv run render-video
   （「空の箱」が「そらの箱」と読まれてしまう不具合の対策。
   `voicevox_client.READING_OVERRIDES`に追加すれば他の単語も補正できる）
 
-**音声・字幕・映像の時間を一致させる仕組み**: 3つとも同じ「cursor」の積み上げ
-（タイトル区間の無音 + 各セリフの実測時間 + セリフ間の"間"）から計算しており、
-食い違わないようにしている。以前は音声トラックにタイトル区間の無音を
-入れ忘れており、字幕・映像より音声が2秒ほど早く進んでしまう不具合があった
-（実際に477.2秒の映像に対し音声が474.88秒しかない、という形で発覚した）。
-また、音声結合用のファイルリストを画像用と同じ関数で作っていたため、
-末尾のセリフの音声が誤って2回結合されてしまう不具合もあった。どちらも修正済み。
+### タイミングを一致させる仕組み
+
+音声・字幕・スライド表示時間の3つがズレないよう、すべて同じ「cursor」の
+積み上げ（タイトル区間の無音 + 各セリフの実測時間 + セリフ間の"間"）から
+計算している。
+
+```mermaid
+flowchart TD
+    ScriptMd["script.md"] --> Parse["script_parser.py<br/>正規表現でシーン・セリフに分解"]
+    Parse --> Synth["各セリフをVOICEVOXで音声合成<br/>+タイトル無音2秒 +セリフ間0.4秒"]
+    Synth --> Cursor["cursorの積み上げ<br/>(この値が音声・字幕・映像で共通)"]
+    Cursor --> AudioTrack["音声セグメント列を結合<br/>→ full_audio.wav"]
+    Cursor --> SubtitleTiming["セリフごとのstart/end<br/>→ ASS字幕(話者ごとに色分け)"]
+    Cursor --> VisualTiming["シーンの開始〜次シーン開始<br/>→ 各スライドの表示秒数"]
+    SlidesManifest["slides/manifest.json<br/>(scene_number)"] --> VisualTiming
+    VisualTiming --> SilentVideo["無音のスライド映像"]
+    AudioTrack --> Merge["ffmpegで合成"]
+    SilentVideo --> Merge
+    SubtitleTiming --> Merge
+    CharAssets["assets/characters/<br/>(あれば口の開閉を合成)"] --> Merge
+    Merge --> Final["final_video.mp4"]
+```
+
+以前は音声トラックにタイトル区間の無音を入れ忘れており、字幕・映像より音声が
+2秒ほど早く進んでしまう不具合があった（実際に477.2秒の映像に対し音声が
+474.88秒しかない、という形で発覚した）。また、音声結合用のファイルリストを
+画像用と同じ関数で作っていたため、末尾のセリフの音声が誤って2回結合されてしまう
+不具合もあった。どちらも修正済み。
 
 日本語フォントはfontconfig経由の解決に頼らず、`assets/fonts/`に同梱した
 静的なNoto Sans JP(Bold/Regular)を`fontsdir`オプションで直接指定している
@@ -222,7 +296,7 @@ PSDや別の絵柄だと口のレイヤー名が異なる場合があるので�
 | `output/<実行時刻>/slides/` | スライド画像一式(PNG、1枚=1スライド。表紙は`slide_00_title.png`) |
 | `output/<実行時刻>/backgrounds/` | （背景生成有効時）Geminiで生成した背景イラストの元画像 |
 | `output/<実行時刻>/description.txt` | YouTube概要欄用テキスト（概要文・目次・使用技術・元記事リンク・ハッシュタグ・VOICEVOX/立ち絵クレジット） |
-| `output/<実行時刻>/thumbnail.png` | YouTubeサムネイル画像（16:9, 1280x720） |
+| `output/<実行時刻>/thumbnail.png` | （`generate-thumbnail`実行後）YouTubeサムネイル画像（16:9, 1280x720） |
 | `output/<実行時刻>/audio/` | （`voicevox-synthesize`実行後）セリフごとのWAV音声+manifest.json |
 | `output/<実行時刻>/final_video.mp4` | （`render-video`実行後）色分け字幕つき（立ち絵素材があれば口の開閉つき）の完成動画 |
 
@@ -247,8 +321,9 @@ video_pipeline/
 ├── thumbnail_generator.py # サムネイル(16:9)を組み立て(背景+文字+立ち絵)
 ├── assets/fonts/          # Noto Sans JP(スライド用:可変フォント、字幕用:静的Bold/Regular)
 ├── assets/characters/     # prepare-charactersが書き出す立ち絵PNG(口開閉2状態×2キャラ)
-├── pipeline.py            # 全体のオーケストレーション
+├── pipeline.py            # 全体のオーケストレーション(サムネイルは含まない)
 ├── main.py                # CLIエントリーポイント(video-pipeline)
+├── generate_thumbnail.py  # CLIエントリーポイント(generate-thumbnail)
 ├── synthesize_audio.py    # CLIエントリーポイント(voicevox-synthesize)
 ├── render_video.py        # CLIエントリーポイント(render-video)
 ├── prepare_characters.py  # CLIエントリーポイント(prepare-characters)
@@ -333,23 +408,49 @@ VOICEVOXの音声を使う場合、利用規約で決まった表記（「VOICEV
 
 ## サムネイル生成
 
-`video-pipeline`実行時に自動で`output/<実行時刻>/thumbnail.png`
-（16:9, 1280x720）が生成される。
+サムネイル生成は`video-pipeline`には含まれておらず、`generate-thumbnail`
+という独立したコマンドになっている。サムネイルの文言や背景だけ作り直したい
+時に、台本・スライドなど他のエージェントを無駄に動かさずに済むようにするため
+（呼び出すエージェントは`thumbnail_agent`のみ、Claude APIは1回だけ呼ぶ軽量な設計）。
 
-- `thumbnail_agent.py`が台本からキャッチコピー(main_text/sub_text)を1回だけ
-  生成する（他のエージェントと違い評価・修正ループは行わない軽量な設計）
-- `thumbnail_generator.py`が背景（`--generate-images`有効時はGemini生成の
-  挿絵、それ以外はアクセントカラーのグラデーション）の上に、縁取り付きの
-  大きな文字でキャッチコピーを描画する
+```bash
+uv run generate-thumbnail --script output/20260731_153000/script.md
+# または、output/*/から対話的に選ぶ
+uv run generate-thumbnail
+```
+
+`output/<実行時刻>/thumbnail.png`（16:9, 1280x720）に保存される
+（`--output`で変更可）。
+
+- `thumbnail_agent.py`が台本からキャッチコピー(main_text/sub_text)を1回だけ生成する
+- 画像生成は2段階のフォールバック構成:
+  1. **推奨**: `GEMINI_API_KEY`が使えれば、Geminiに背景・イラスト・文字を
+     丸ごと生成させる（`thumbnail_generator.generate_thumbnail_with_gemini`）。
+     文字と背景を一体で描かせるので、テキストとイラストのレイアウトが
+     自然に噛み合う。通常のスライド背景生成より文字精度が重要なため、
+     `GEMINI_THUMBNAIL_MODEL`（デフォルト`gemini-3-pro-image-preview`、
+     Nano Banana Pro）を使う。1本の動画につき1回だけの生成なので、
+     高価なモデルでもコスト影響は小さい
+  2. Geminiが使えない、または生成に失敗した場合は、Pillowでテキストと
+     キャラクター立ち絵を個別に重ねて描く（`build_thumbnail`、フォールバック）。
+     この方式はテキストを画面上部・キャラクターを下部に固定配置することで、
+     両者が重ならないようにしている（**以前はテキストを画面中央に配置しており、
+     キャラクターの顔と重なってしまう不具合が実際に発生した**。実際に生成した
+     画像で、文字とキャラクターの領域が完全に分離していることをピクセル差分で
+     検証済み）
+- `--no-gemini-fulltext`を付けると、Geminiが使える場合でも文字はGeminiに
+  焼き込ませずPillowで別途重ねる（Geminiの文字精度に不安がある場合向け）
 - `assets/characters/`に立ち絵素材（`prepare-characters`で準備したもの）が
-  あれば、動画本編と同じ配置（つむぎ=左下、ずんだもん=右下）でサムネイルにも
-  表示し、動画との見た目の一貫性を持たせる
+  あれば、フォールバック方式の場合のみ、動画本編と同じ配置（つむぎ=左下、
+  ずんだもん=右下）でサムネイルにも表示する（Geminiが丸ごと生成する場合は
+  実際のキャラクター素材をそのまま使わせることはできないため、含まれない）
 
 生成された`thumbnail.png`は、`render-video`実行時に**動画冒頭のタイトル区間
 （2秒間）にもそのまま使われる**（YouTubeのサムネイルと動画の最初に見える画面を
 一致させるため）。同じディレクトリに`thumbnail.png`があれば自動的に使われ、
 無効にしたい場合は`--no-thumbnail-intro`を付ける、別の画像を使いたい場合は
-`--thumbnail <パス>`で指定する。
+`--thumbnail <パス>`で指定する。`generate-thumbnail`を実行していなければ
+（`thumbnail.png`が無ければ）、従来通りスライドのタイトル画面が使われる。
 
 注意点: ffmpegのconcatデマクサーは、先頭の画像だけ動画と異なる解像度だと
 正しく扱えず、その画像が実質無視されてしまう不具合があったため、
@@ -479,6 +580,15 @@ ffmpeg -filters | grep ass   # ass / subtitles が表示されればOK
 ```
 
 `ffmpeg-full`が正しくリンクされない場合は`brew link --overwrite ffmpeg-full`を試す。
+
+### `Could not resolve authentication method. Expected one of api_key, ...`
+
+`.env`に`ANTHROPIC_API_KEY`を設定していても、そのCLIのコード側で`.env`を
+読み込む処理(`load_dotenv()`)が無いと、環境変数として認識されずこのエラーになる
+（`generate-thumbnail`追加時に`main.py`にはあった`load_dotenv()`を入れ忘れていた
+ことが原因で実際に発生した）。最新版なら修正済みのはずだが、もし別のコマンドで
+同様のエラーが出た場合は、そのコマンドのPythonファイルに`load_dotenv()`の
+呼び出しがあるか確認する。
 
 ### `output/<実行時刻>/slides/manifest.json が見つかりません`
 
