@@ -11,7 +11,8 @@ import os
 # - EXTRACT:  VOICEVOX用テキスト抽出など、フォーマットに沿って機械的に整形するだけの作業
 MODEL_GENERATE = os.environ.get("CLAUDE_MODEL_GENERATE", "claude-sonnet-5")
 MODEL_EVALUATE = os.environ.get("CLAUDE_MODEL_EVALUATE", "claude-opus-4-8")
-MODEL_EXTRACT = os.environ.get("CLAUDE_MODEL_EXTRACT", "claude-haiku-4-5-20251001")
+MODEL_EXTRACT = os.environ.get(
+    "CLAUDE_MODEL_EXTRACT", "claude-haiku-4-5-20251001")
 
 # 生成→評価→修正ループの最大試行回数（ai-dev-agent構想と同じく上限3回）
 MAX_REVISION_LOOPS = 3
@@ -32,4 +33,14 @@ GENERATE_SLIDE_IMAGES = os.environ.get("GENERATE_SLIDE_IMAGES", "0") == "1"
 # 使用するGemini画像生成モデル。
 # gemini-2.5-flash-image / gemini-3.1-flash-image-preview(Nano Banana 2, 安価) /
 # gemini-3-pro-image-preview(Nano Banana Pro, 高品質・文字精度が高いが高価)
-GEMINI_IMAGE_MODEL = os.environ.get("GEMINI_IMAGE_MODEL", "gemini-3.1-flash-image-preview")
+GEMINI_IMAGE_MODEL = os.environ.get(
+    "GEMINI_IMAGE_MODEL", "gemini-3.1-flash-image-preview")
+
+# 立ち絵イラストレーターのクレジット表記。PSDファイル自体からは著作者情報を
+# 読み取れないため、.envや環境変数で明示的に設定する必要がある
+# (配布元のページ・README等に記載されている表記をそのまま使う想定)。
+# 未設定の場合は概要欄にプレースホルダーが入る。
+TSUMUGI_ILLUSTRATOR_CREDIT = os.environ.get(
+    "TSUMUGI_ILLUSTRATOR_CREDIT", "坂本アヒル 様")
+ZUNDAMON_ILLUSTRATOR_CREDIT = os.environ.get(
+    "ZUNDAMON_ILLUSTRATOR_CREDIT", "坂本アヒル 様")

@@ -216,7 +216,8 @@ PSDや別の絵柄だと口のレイヤー名が異なる場合があるので�
 | `output/<実行時刻>/voicevox_script.txt` | `[話者名] セリフ` 形式の読み上げ用テキスト |
 | `output/<実行時刻>/slides/` | スライド画像一式(PNG、1枚=1スライド。表紙は`slide_00_title.png`) |
 | `output/<実行時刻>/backgrounds/` | （背景生成有効時）Geminiで生成した背景イラストの元画像 |
-| `output/<実行時刻>/description.txt` | YouTube概要欄用テキスト（概要文・目次・元記事リンク・ハッシュタグ） |
+| `output/<実行時刻>/description.txt` | YouTube概要欄用テキスト（概要文・目次・使用技術・元記事リンク・ハッシュタグ・VOICEVOX/立ち絵クレジット） |
+| `output/<実行時刻>/thumbnail.png` | YouTubeサムネイル画像（16:9, 1280x720） |
 | `output/<実行時刻>/audio/` | （`voicevox-synthesize`実行後）セリフごとのWAV音声+manifest.json |
 | `output/<実行時刻>/final_video.mp4` | （`render-video`実行後）色分け字幕つき（立ち絵素材があれば口の開閉つき）の完成動画 |
 
@@ -238,6 +239,7 @@ video_pipeline/
 ├── io_utils.py            # ファイル入出力
 ├── loop.py                # 生成→評価→修正ループの共通ロジック
 ├── slide_image_builder.py # スライド内容(JSON、4レイアウト対応) -> PNG画像(Pillowで直接描画)
+├── thumbnail_generator.py # サムネイル(16:9)を組み立て(背景+文字+立ち絵)
 ├── assets/fonts/          # Noto Sans JP(スライド用:可変フォント、字幕用:静的Bold/Regular)
 ├── assets/characters/     # prepare-charactersが書き出す立ち絵PNG(口開閉2状態×2キャラ)
 ├── pipeline.py            # 全体のオーケストレーション
@@ -250,7 +252,9 @@ video_pipeline/
     ├── slides_agent.py        # スライド内容(background_prompt, scene_number含む)の生成・評価・修正
     ├── voicevox_agent.py      # VOICEVOX用テキストの生成・評価・修正
     ├── integration_agent.py   # 3つの横断的な整合性チェック
-    └── description_agent.py   # YouTube概要欄（概要文・目次・リンク・タグ）の生成・評価・修正
+    └── description_agent.py   # YouTube概要欄（概要文・目次・使用技術・リンク・タグ）の生成・評価・修正
+                                # +VOICEVOX/立ち絵クレジット欄を決定的に付け足す
+    └── thumbnail_agent.py      # サムネイル用キャッチコピー(main_text/sub_text)の生成(単発呼び出し)
 ```
 
 ## 調整できるパラメータ（`config.py`）
@@ -292,6 +296,32 @@ VOICEVOXテキスト抽出のような機械的な作業は軽量モデルを割
 背景生成はほぼ全スライドに対して行われるため、`--generate-images`を使うと
 Gemini APIの呼び出し回数・コストが動画1本あたりスライド枚数分（10〜16回程度）
 発生する点は把握しておく。
+
+## 概要欄のクレジット表記について
+
+VOICEVOXの音声を使う場合、利用規約で決まった表記（「VOICEVOX:キャラ名」）を
+概要欄に入れる必要がある。`description_agent.build_credits_block()`が
+これを決定的に（LLMに書かせず）付け足すので、表記が毎回変わったり
+抜け落ちたりしない。
+
+立ち絵イラストのクレジットは、PSDファイル自体からは著作者情報を読み取れない
+ため、`.env`の`TSUMUGI_ILLUSTRATOR_CREDIT`・`ZUNDAMON_ILLUSTRATOR_CREDIT`に
+配布元ページやREADME記載の表記をそのまま設定する必要がある。未設定の場合は
+プレースホルダーが入るので、**投稿前に必ず確認して差し替えること**。
+
+## サムネイル生成
+
+`video-pipeline`実行時に自動で`output/<実行時刻>/thumbnail.png`
+（16:9, 1280x720）が生成される。
+
+- `thumbnail_agent.py`が台本からキャッチコピー(main_text/sub_text)を1回だけ
+  生成する（他のエージェントと違い評価・修正ループは行わない軽量な設計）
+- `thumbnail_generator.py`が背景（`--generate-images`有効時はGemini生成の
+  挿絵、それ以外はアクセントカラーのグラデーション）の上に、縁取り付きの
+  大きな文字でキャッチコピーを描画する
+- `assets/characters/`に立ち絵素材（`prepare-characters`で準備したもの）が
+  あれば、動画本編と同じ配置（つむぎ=左下、ずんだもん=右下）でサムネイルにも
+  表示し、動画との見た目の一貫性を持たせる
 
 ## 記事のコード・図をスライドに貼り付ける
 

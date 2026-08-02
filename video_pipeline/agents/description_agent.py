@@ -3,12 +3,20 @@
 概要欄には以下を含める:
 - 動画の概要文（何がわかるか・見るメリット）
 - タイムスタンプ付きの目次（YouTubeのチャプター機能に対応する形式）
+- （任意）使用技術・ライブラリ
 - 元記事(Zenn/note等)のURLを貼る行
 - 関連ハッシュタグ
+- VOICEVOX/立ち絵のクレジット（LLM生成ではなく決定的に付け足す。利用規約上
+  必須の表記なので、LLMに書かせて表現を変えられたり抜け落ちたりしないようにする）
 """
 
 from video_pipeline.claude_client import call_text, call_json
-from video_pipeline.config import MODEL_EVALUATE, MODEL_GENERATE
+from video_pipeline.config import (
+    MODEL_EVALUATE,
+    MODEL_GENERATE,
+    TSUMUGI_ILLUSTRATOR_CREDIT,
+    ZUNDAMON_ILLUSTRATOR_CREDIT,
+)
 from video_pipeline.loop import run_with_evaluation_loop
 
 LABEL = "概要欄エージェント"
@@ -25,13 +33,19 @@ GENERATE_SYSTEM = """あなたはYouTube動画の概要欄作成担当です。�
    - 1行目は必ず "0:00 概要" のように 0:00 から始める（YouTubeのチャプター機能の要件）
    - 各行は "M:SS タイトル" または "MM:SS タイトル" の形式（台本の見出しをそのまま
      使うのではなく、視聴者に伝わりやすい短いタイトルに言い換える）
-3. 空行を挟んで「元記事」という見出しと、渡された元記事URLをそのまま1行で記載
-4. 空行を挟んで関連ハッシュタグを3〜5個（#機械学習 のような形式）
+3. 空行を挟んで「🛠 使用技術」という見出し（台本・記事に登場する主要な
+   ライブラリ・技術の名前を箇条書きで。例: Python、scikit-learn、pandas）
+   - URLは書かない（実在しないURLを創作するリスクを避けるため、名前だけ書く。
+     リンクを付けたい場合は人間が後から追記する前提）
+   - 台本・記事に技術要素がほとんど無い場合はこのブロックを省略してよい
+4. 空行を挟んで「元記事」という見出しと、渡された元記事URLをそのまま1行で記載
+5. 空行を挟んで関連ハッシュタグを3〜5個（#機械学習 のような形式）
 
 制約:
 - 元記事URLが "（URL未設定）" のようなプレースホルダーの場合は、それをそのまま記載する
   （実在しないURLを創作しない）
-- 出力は上記4ブロックのプレーンテキストのみ。前置きや説明文、コードフェンスは不要
+- 出力は上記ブロックのプレーンテキストのみ。前置きや説明文、コードフェンスは不要
+  （VOICEVOXやイラストのクレジット表記は書かなくてよい。別途決定的に付け足すため）
 """
 
 EVALUATE_SYSTEM = """あなたはYouTube概要欄のレビュアーです。動画台本と概要欄テキストを
@@ -42,6 +56,8 @@ EVALUATE_SYSTEM = """あなたはYouTube概要欄のレビュアーです。動�
 - 台本冒頭0:00〜1:00の概要パートの内容と矛盾していないか
 - 目次の1行目が 0:00 から始まっているか
 - 目次の時刻・順序が台本のシーン展開と一致しているか
+- 使用技術セクションに実在しないURLが創作されていないか（無くて良い、
+  あるなら名前だけであるべき）
 - 元記事URLを貼る行が存在するか（プレースホルダーのままでも構わない）
 - ハッシュタグが動画の内容に関連しているか
 
@@ -49,8 +65,32 @@ JSON形式 {"score": <int>, "feedback": "<改善点。問題なければ空文�
 """
 
 REVISE_SYSTEM = """あなたは概要欄の修正担当です。フィードバックに基づいて概要欄テキストを
-修正してください。出力は概要文・目次・元記事URL・ハッシュタグを含むプレーンテキストのみ。
+修正してください。出力は概要文・目次・(使用技術)・元記事URL・ハッシュタグを
+含むプレーンテキストのみ（VOICEVOX/イラストのクレジットは書かなくてよい）。
 """
+
+
+def build_credits_block(
+    tsumugi_credit: str = TSUMUGI_ILLUSTRATOR_CREDIT,
+    zundamon_credit: str = ZUNDAMON_ILLUSTRATOR_CREDIT,
+) -> str:
+    """VOICEVOX・立ち絵イラストのクレジット表記を決定的に生成する。
+
+    VOICEVOXの音声そのものは規約で決まった表記(「VOICEVOX:キャラ名」)を使う。
+    立ち絵イラストのクレジットはPSDファイルからは判別できないため、
+    config.TSUMUGI_ILLUSTRATOR_CREDIT等で明示的に設定してもらう必要がある。
+    未設定の場合はプレースホルダーを入れる(投稿前に必ず差し替えること)。
+    """
+    tsumugi_illust = tsumugi_credit or "（つむぎ立ち絵のイラストクレジットをここに入れてください）"
+    zundamon_illust = zundamon_credit or "（ずんだもん立ち絵のイラストクレジットをここに入れてください）"
+
+    return (
+        "【クレジット】\n"
+        "VOICEVOX:春日部つむぎ\n"
+        "VOICEVOX:ずんだもん\n"
+        f"つむぎ立ち絵: {tsumugi_illust}\n"
+        f"ずんだもん立ち絵: {zundamon_illust}"
+    )
 
 
 def generate(script: str, article_url: str) -> str:
