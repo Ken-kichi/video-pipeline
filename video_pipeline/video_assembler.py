@@ -370,7 +370,7 @@ def _load_slides_manifest(slides_dir: Path) -> list[dict]:
 
 
 def _build_visual_timeline(
-    timeline: list[TimedLine], slides_dir: Path
+    timeline: list[TimedLine], slides_dir: Path, thumbnail_path: Path | None = None
 ) -> list[tuple[Path, float]]:
     """(スライド画像パス, 表示秒数) のリストを、シーンごとの実時間から作る。
 
@@ -378,6 +378,10 @@ def _build_visual_timeline(
     最初のセリフの開始時刻」までの実時間で計算する(単純に各セリフの
     end-startを足すだけだと、セリフ間に挿入した無音の"間"がシーンの表示時間に
     反映されず、音声の総再生時間より映像が短くなってしまうため)。
+
+    thumbnail_pathが指定されていれば、冒頭のタイトル区間はスライドの
+    タイトル画面ではなくサムネイル画像そのものを表示する
+    (YouTubeのサムネイルと動画の冒頭を一致させたい場合向け)。
     """
     manifest = _load_slides_manifest(slides_dir)
 
@@ -404,7 +408,9 @@ def _build_visual_timeline(
         scene_duration[scene_number] = end - start
 
     visual_timeline: list[tuple[Path, float]] = []
-    if title_entry:
+    if thumbnail_path and Path(thumbnail_path).exists():
+        visual_timeline.append((Path(thumbnail_path), TITLE_SLIDE_DURATION_SECONDS))
+    elif title_entry:
         visual_timeline.append((slides_dir / title_entry["file"], TITLE_SLIDE_DURATION_SECONDS))
 
     for scene_number in ordered_scenes:
@@ -465,8 +471,14 @@ def assemble_video(
     work_dir: str | Path | None = None,
     style_map: dict[str, str] | None = None,
     base_url: str = DEFAULT_BASE_URL,
+    thumbnail_path: str | Path | None = None,
 ) -> Path:
-    """script.md + スライド画像 + VOICEVOX音声から、色分け字幕つきのmp4を組み立てる。"""
+    """script.md + スライド画像 + VOICEVOX音声から、色分け字幕つきのmp4を組み立てる。
+
+    thumbnail_pathを指定すると、動画冒頭のタイトル区間がスライドのタイトル
+    画面ではなくサムネイル画像そのものになる(YouTubeのサムネイルと動画の
+    冒頭を一致させたい場合向け)。
+    """
     script_path = Path(script_path)
     slides_dir = Path(slides_dir)
     output_path = Path(output_path)
@@ -484,7 +496,18 @@ def assemble_video(
     ass_path = _build_ass_subtitle(timeline, work_dir / "captions.ass")
 
     print("=== スライドの表示時間を計算中 ===")
-    visual_timeline = _build_visual_timeline(timeline, slides_dir)
+    resolved_thumbnail_path = None
+    if thumbnail_path and Path(thumbnail_path).exists():
+        # ffmpegのconcatデマクサーは、先頭の画像だけ解像度が異なると正しく
+        # 扱えず、その画像が実質無視されてしまう不具合があった(scaleフィルタを
+        # 掛けていても解消しない)。事前に動画と同じ解像度にリサイズしてから
+        # 渡すことで回避する。
+        resolved_thumbnail_path = work_dir / "thumbnail_for_intro.png"
+        thumb_img = Image.open(thumbnail_path).convert("RGB")
+        thumb_img = thumb_img.resize((VIDEO_WIDTH, VIDEO_HEIGHT), Image.LANCZOS)
+        thumb_img.save(resolved_thumbnail_path)
+
+    visual_timeline = _build_visual_timeline(timeline, slides_dir, resolved_thumbnail_path)
 
     print("=== 音声を結合中 ===")
     audio_concat_path = _write_audio_concat_file(
@@ -505,7 +528,9 @@ def assemble_video(
     _run_ffmpeg(
         [
             "-f", "concat", "-safe", "0", "-i", str(image_concat_path),
-            "-vf", f"fps={VIDEO_FPS},format=yuv420p",
+            # サムネイル(1280x720)のように画像サイズが異なるものが混ざっても
+            # 動画解像度に統一する(アスペクト比は同じ16:9なので歪みは出ない)
+            "-vf", f"scale={VIDEO_WIDTH}:{VIDEO_HEIGHT},fps={VIDEO_FPS},format=yuv420p",
             "-r", str(VIDEO_FPS),
             str(silent_video_path),
         ]
@@ -534,6 +559,12 @@ def assemble_video(
         y_expr = "main_h-overlay_h"
         intervals = [(item.start, item.end) for item in timeline if item.speaker == speaker]
         enable_expr = _build_enable_expr(intervals)
+        # サムネイルを冒頭に使う場合、サムネイル自体に既にキャラクターが
+        # 描かれているため、その区間だけ動画側のオーバーレイ(常時表示の
+        # 「口を閉じた」状態)を出さないようにして二重表示を避ける
+        closed_enable_expr = (
+            f"gte(t,{TITLE_SLIDE_DURATION_SECONDS})" if resolved_thumbnail_path else "1"
+        )
 
         ffmpeg_inputs += ["-i", str(assets["closed"])]
         closed_idx = input_index
@@ -547,7 +578,8 @@ def assemble_video(
         # まず口を閉じた状態を常時オーバーレイ(=待機中のデフォルト表示)、
         # その上に口を開いた状態を、そのキャラクターが喋っている区間だけ重ねる
         filter_stages.append(
-            f"[{current_label}][{closed_idx}:v]overlay=x={x_expr}:y={y_expr}[{bg_closed_label}]"
+            f"[{current_label}][{closed_idx}:v]overlay=x={x_expr}:y={y_expr}:"
+            f"enable='{closed_enable_expr}'[{bg_closed_label}]"
         )
         filter_stages.append(
             f"[{bg_closed_label}][{open_idx}:v]overlay=x={x_expr}:y={y_expr}:"
