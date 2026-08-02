@@ -90,12 +90,16 @@ def main() -> None:
     thumbnail_copy = thumbnail_agent.generate(script_text)
     print(f"  main_text: {thumbnail_copy['main_text']}")
     print(f"  sub_text : {thumbnail_copy['sub_text']}")
+    print(f"  visual_summary: {thumbnail_copy['visual_summary']}")
 
     thumbnail_path = None
     if generate_images and not args.no_gemini_fulltext:
         print("=== Geminiでサムネイルを丸ごと生成中 ===")
         thumbnail_path = generate_thumbnail_with_gemini(
-            thumbnail_copy["main_text"], thumbnail_copy["sub_text"], output_path
+            thumbnail_copy["main_text"],
+            thumbnail_copy["sub_text"],
+            output_path,
+            visual_summary=thumbnail_copy["visual_summary"],
         )
         if thumbnail_path is None:
             print("  Geminiでの生成に失敗したため、Pillowでの組み立てにフォールバックします")

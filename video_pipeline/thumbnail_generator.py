@@ -37,12 +37,22 @@ SUB_TEXT_COLOR = "#FFE066"
 TEXT_TOP_MARGIN = 50
 
 # Geminiにサムネイルを丸ごと生成させる際のスタイル指定。
+# 単に「文字+汎用的な背景」にしかならなかった(実際にそうなった)反省を踏まえ、
+# 比較図・アイコン・パネルなどの図解イラストを積極的にデザインさせる指示にしている。
 GEMINI_THUMBNAIL_STYLE = (
-    "YouTube thumbnail design, 16:9 aspect ratio. Dark navy background with "
-    "subtle glowing blue/purple circuit-like lines and abstract tech nodes. "
-    "Bold, clean, highly legible Japanese sans-serif typography with strong "
-    "color contrast (white or bright accent color) so it reads clearly even "
-    "as a small preview thumbnail. Professional, modern, minimal clutter. "
+    "YouTube thumbnail design, 16:9 aspect ratio, in the style of a polished "
+    "professional tech infographic (not just text on a plain background). "
+    "Design 1-2 illustrated diagram elements or labeled panels that visually "
+    "represent the key concepts, comparison, or numbers described in the "
+    "content summary below — for example: two labeled boxes side by side for "
+    "a comparison, a network/brain icon for an AI concept, a magnifying glass "
+    "or document icon for data/analysis, arrows connecting related ideas, or "
+    "a small chart for a numeric improvement. Add short keyword labels near "
+    "the illustrations where helpful. Dark navy background with glowing "
+    "blue/purple accent lines and nodes. Bold, clean, highly legible Japanese "
+    "sans-serif typography with strong color contrast so it reads clearly "
+    "even as a small preview thumbnail. Professional, modern, well-composed "
+    "layout — avoid a plain empty background with only text. "
     "No watermarks, no logos, no borders."
 )
 
@@ -93,26 +103,36 @@ def _cover_resize_crop(img: Image.Image, target_width: int, target_height: int) 
     return resized.crop((left, top, left + target_width, top + target_height))
 
 
-def build_gemini_thumbnail_prompt(main_text: str, sub_text: str) -> str:
-    """Geminiにサムネイルを丸ごと生成させるためのプロンプトを組み立てる。"""
+def build_gemini_thumbnail_prompt(main_text: str, sub_text: str, visual_summary: str = "") -> str:
+    """Geminiにサムネイルを丸ごと生成させるためのプロンプトを組み立てる。
+
+    main_text/sub_textだけを渡すと「文字+汎用的な背景」にしかならなかった
+    (実際にそうなった)ため、visual_summary(動画の核心的な内容の要約)を
+    渡し、それをもとにGeminiが比較図・アイコンなどの図解イラストを
+    自律的にデザインできるようにしている。
+    """
     lines = [
         "Design a YouTube video thumbnail image.",
         f'Prominently render this exact Japanese text as the large bold headline: "{main_text}"',
     ]
     if sub_text:
         lines.append(f'Render this exact Japanese text smaller, as a subheading near it: "{sub_text}"')
+    if visual_summary:
+        lines.append(f"Content summary to base the illustration on: {visual_summary}")
     lines.append(
-        "Do not misspell, translate, or alter the given text in any way. "
-        "Do not add any other words, captions, or labels to the image."
+        "Do not misspell, translate, or alter the given headline/subheading text. "
+        "Short keyword labels for the illustrated diagram elements are fine "
+        "(see style guidance below), but do not add unrelated extra text, "
+        "watermarks, or logos."
     )
     lines.append(GEMINI_THUMBNAIL_STYLE)
     return " ".join(lines)
 
 
 def generate_thumbnail_with_gemini(
-    main_text: str, sub_text: str, output_path: str | Path
+    main_text: str, sub_text: str, output_path: str | Path, visual_summary: str = ""
 ) -> Path | None:
-    """Geminiに背景・文字を丸ごと生成させる。失敗した場合はNoneを返す。
+    """Geminiに背景・イラスト・文字を丸ごと生成させる。失敗した場合はNoneを返す。
 
     通常のスライド背景生成(image_generator.generate_slide_background)とは
     別に、文字精度重視のGEMINI_THUMBNAIL_MODELを明示的に指定する。
@@ -121,7 +141,7 @@ def generate_thumbnail_with_gemini(
     from video_pipeline.image_generator import generate_slide_image
 
     output_path = Path(output_path)
-    prompt = build_gemini_thumbnail_prompt(main_text, sub_text)
+    prompt = build_gemini_thumbnail_prompt(main_text, sub_text, visual_summary)
     raw_path = generate_slide_image(
         prompt,
         output_path.parent / "_thumbnail_gemini_raw.png",
