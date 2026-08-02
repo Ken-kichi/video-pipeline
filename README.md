@@ -201,15 +201,50 @@ uv run render-video
 5. (任意) `assets/characters/`に立ち絵の口開閉2状態のPNGが揃っていれば、
    そのキャラクターが喋っている区間だけ口を開いた画像に切り替える
    オーバーレイを合成する(下記「立ち絵オーバーレイ」参照)
-6. ffmpegで (a)音声を結合 (b)スライド画像を表示時間通りに並べた無音動画を作成
-   (c) 動画+音声+字幕(+立ち絵)を1本のmp4に合成する
+6. (任意) BGM・ページめくり音を音声にミキシングする(下記「BGM・効果音」参照)
+7. ffmpegで (a)音声(セリフ+BGM+効果音)を結合 (b)スライド画像を表示時間通りに
+   並べた無音動画を作成 (c) 動画+音声+字幕(+立ち絵)を1本のmp4に合成する
 
 音声合成に渡す直前のテキストには、以下の補正も加えている(字幕表示には影響しない):
 - 「（笑）」「（汗）」のような非言語的な注釈をVOICEVOXへ渡す前に取り除く
   （そのまま渡すと「わらい」のように読み上げられてしまう不具合の対策）
 - 「空の」→「からの」のように、既知の読み間違いを補正する
-  （「空の箱」が「そらの箱」と読まれてしまう不具合の対策。
-  `voicevox_client.READING_OVERRIDES`に追加すれば他の単語も補正できる）
+  （「空の箱」が「そらの箱」と読まれてしまう不具合の対策。他にも「架空」→
+  「かくう」、「誤分類」→「ごぶんるい」、「この値」/「その値」→「あたい」
+  読みを補正している。`voicevox_client.READING_OVERRIDES`に追加すれば
+  他の単語も補正できるが、**辞書の反復順序がそのまま適用順序になる**ため、
+  「架空」のような具体的なパターンは「空の」のような短く汎用的なパターンより
+  先に書くこと（逆順だと「架空の」が先に「空の」ルールに食われて「架からの」に
+  壊れてしまう不具合が実際に発生した）。「値」は複合語（数値・戻り値等）で
+  読みが変わるため、単独用法と判断できる「この値」「その値」のような
+  完全なフレーズ単位で追加すること（「値」単体や「値が」のような断片は
+  他の複合語を壊すリスクがある）
+
+## BGM・効果音
+
+```bash
+# BGMファイルを置いておく(著作権の都合上、同梱していないので各自で用意する)
+cp あなたのBGM.mp3 video_pipeline/assets/bgm/
+
+uv run render-video --bgm video_pipeline/assets/bgm/あなたのBGM.mp3
+# または、output/*/を選ぶのと同様に、assets/bgm/の中身から対話的に選べる
+# (「BGMを使わない」という選択肢もある)
+uv run render-video
+```
+
+- **BGM**: 動画より短ければ自動でループ再生する(ffmpegの`-stream_loop -1`で
+  無限ループにした上で、動画の長さぴったりに切り詰める)。動画全体の
+  最初と最後にだけ3秒のフェードイン/アウトをかける（ループの継ぎ目ごとには
+  かけない。継ぎ目で音が途切れないことをピクセル単位ならぬサンプル単位の
+  RMS解析で検証済み）
+- **ページめくり音**: `assets/sfx/page_turn.mp3`（同梱）を、スライドが
+  切り替わるタイミングで自動的に鳴らす。`--no-page-turn-sound`で無効化できる
+- **音量**: BGM・ページめくり音はどちらもセリフの音声より小さくしている
+  （`video_assembler.BGM_VOLUME`=0.25、`PAGE_TURN_VOLUME`=0.5。セリフは
+  1.0のまま変更しない。ffmpegの`amix`フィルタで`normalize=0`を指定し、
+  トラック数に応じて自動的に音量が下げられてしまうのを防いでいる）
+- `--no-bgm`でBGMの対話選択自体をスキップできる（`assets/bgm/`に
+  ファイルが無い場合は自動的にBGM無しで続行する）
 
 ### タイミングを一致させる仕組み
 
@@ -225,9 +260,14 @@ flowchart TD
     Cursor --> AudioTrack["音声セグメント列を結合<br/>→ full_audio.wav"]
     Cursor --> SubtitleTiming["セリフごとのstart/end<br/>→ ASS字幕(話者ごとに色分け)"]
     Cursor --> VisualTiming["シーンの開始〜次シーン開始<br/>→ 各スライドの表示秒数"]
+    Cursor --> Transitions["スライド切り替え時刻<br/>→ ページめくり音の再生位置"]
     SlidesManifest["slides/manifest.json<br/>(scene_number)"] --> VisualTiming
     VisualTiming --> SilentVideo["無音のスライド映像"]
-    AudioTrack --> Merge["ffmpegで合成"]
+    BGM["BGM(あれば)<br/>ループ+3秒フェードIN/OUT"] --> Mix["音声ミックス<br/>(セリフ+BGM+ページめくり音)"]
+    AudioTrack --> Mix
+    Transitions --> SFX["ページめくり音<br/>(assets/sfx/page_turn.mp3)"]
+    SFX --> Mix
+    Mix --> Merge["ffmpegで合成"]
     SilentVideo --> Merge
     SubtitleTiming --> Merge
     CharAssets["assets/characters/<br/>(あれば口の開閉を合成)"] --> Merge
@@ -321,6 +361,8 @@ video_pipeline/
 ├── thumbnail_generator.py # サムネイル(16:9)を組み立て(背景+文字+立ち絵)
 ├── assets/fonts/          # Noto Sans JP(スライド用:可変フォント、字幕用:静的Bold/Regular)
 ├── assets/characters/     # prepare-charactersが書き出す立ち絵PNG(口開閉2状態×2キャラ)
+├── assets/sfx/            # ページめくり音(page_turn.mp3、同梱)
+├── assets/bgm/            # BGMファイルの配置場所(著作権の都合上、中身は同梱していない)
 ├── pipeline.py            # 全体のオーケストレーション(サムネイルは含まない)
 ├── main.py                # CLIエントリーポイント(video-pipeline)
 ├── generate_thumbnail.py  # CLIエントリーポイント(generate-thumbnail)
@@ -606,6 +648,14 @@ ffmpeg -filters | grep ass   # ass / subtitles が表示されればOK
 作り直してから`render-video`を実行する。
 
 ## 既知の制約・今後の拡張候補
+
+- (修正済み) つむぎの口調が「言い得て妙」のような硬い言い回しになり、公式設定
+  （埼玉県の高校に通う18歳のギャル、一人称「あーし」）と合っていなかった。
+  `script_agent`の人物設定を具体化し、評価観点にも「ギャルらしいカジュアルさ」
+  のチェックを追加した。あわせてずんだもんの設定も公式（ずんだ餅の精、
+  一人称「ボク」、明るく元気、ちょっとドジ・不幸属性）に基づいて具体化した。
+  これもプロンプトの調整であり生成結果を保証するものではない（再生成した
+  台本で確認することを推奨する）
 
 - (修正済み・要検証) 実際に生成した動画で、台本の掛け合いが「説明→疑問文で
   言い換え→そうです」という同じ型の繰り返しになり単調に感じられる、

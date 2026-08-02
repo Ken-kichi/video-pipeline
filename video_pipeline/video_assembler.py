@@ -53,6 +53,7 @@ from video_pipeline.voicevox_client import (
 
 FONTS_DIR = Path(__file__).parent / "assets" / "fonts"
 CHARACTER_ASSETS_DIR = Path(__file__).parent / "assets" / "characters"
+PAGE_TURN_SFX_PATH = Path(__file__).parent / "assets" / "sfx" / "page_turn.mp3"
 
 # 話者ごとの字幕色(ASS形式 &HAABBGGRR)。黄色系/緑系。
 SUBTITLE_STYLE_COLORS = {
@@ -82,6 +83,13 @@ _SUBTITLE_FONT_PATH = FONTS_DIR / "NotoSansJP-Bold.otf"
 # 対応するスライドが見つからないシーンの最小表示時間(秒)。極端に短い
 # 無表示区間を避けるための下限。
 MIN_SLIDE_DURATION_SECONDS = 0.5
+
+# BGM・ページめくり音は音声(セリフ)より小さくする。0.0〜1.0の相対音量。
+BGM_VOLUME = 0.25
+PAGE_TURN_VOLUME = 0.5
+# BGMの開始・終了にかけるフェードの長さ(秒)。ループ再生している場合でも
+# 動画全体の最初と最後にだけかける(ループの継ぎ目ごとにはかけない)。
+BGM_FADE_SECONDS = 3.0
 
 
 @dataclass
@@ -433,6 +441,21 @@ def _build_visual_timeline(
     return visual_timeline
 
 
+def _compute_slide_transition_times(visual_timeline: list[tuple[Path, float]]) -> list[float]:
+    """スライドが切り替わる時刻(2番目以降の各要素の開始時刻)のリストを返す。
+
+    先頭(タイトル/サムネイル区間)から最初の本編スライドへの切り替わりも
+    1回のページめくりとして含める。
+    """
+    times: list[float] = []
+    cursor = 0.0
+    for i, (_, duration) in enumerate(visual_timeline):
+        if i > 0:
+            times.append(cursor)
+        cursor += duration
+    return times
+
+
 def _write_image_concat_file(entries: list[tuple[str, float]], output_path: Path) -> Path:
     """ffmpeg concat demuxer用の画像リストファイルを書き出す(duration指定あり)。
 
@@ -472,12 +495,20 @@ def assemble_video(
     style_map: dict[str, str] | None = None,
     base_url: str = DEFAULT_BASE_URL,
     thumbnail_path: str | Path | None = None,
+    bgm_path: str | Path | None = None,
+    page_turn_sound: bool = True,
 ) -> Path:
     """script.md + スライド画像 + VOICEVOX音声から、色分け字幕つきのmp4を組み立てる。
 
     thumbnail_pathを指定すると、動画冒頭のタイトル区間がスライドのタイトル
     画面ではなくサムネイル画像そのものになる(YouTubeのサムネイルと動画の
     冒頭を一致させたい場合向け)。
+
+    bgm_pathを指定すると、動画全体にBGMを重ねる。動画より短ければ自動的に
+    ループ再生し、動画全体の最初と最後にBGM_FADE_SECONDS秒のフェードイン/
+    アウトをかける。page_turn_sound=Trueの場合、スライドが切り替わる
+    タイミングでassets/sfx/page_turn.mp3を鳴らす。BGM・ページめくり音は
+    どちらもセリフの音声より小さい音量(BGM_VOLUME/PAGE_TURN_VOLUME)にする。
     """
     script_path = Path(script_path)
     slides_dir = Path(slides_dir)
@@ -544,9 +575,11 @@ def assemble_video(
     if character_assets:
         print(f"  立ち絵オーバーレイを合成します: {', '.join(character_assets)}")
 
+    total_duration = _wav_duration_seconds(full_audio_path)
+
     ffmpeg_inputs = ["-i", str(silent_video_path), "-i", str(full_audio_path)]
     current_label = "0:v"
-    input_index = 2  # 0=映像, 1=音声。キャラクター画像はこの続きから追加する
+    input_index = 2  # 0=映像, 1=音声。キャラクター画像・BGM・SEはこの続きから追加する
     filter_stages: list[str] = []
 
     for speaker, assets in character_assets.items():
@@ -591,11 +624,68 @@ def assemble_video(
         f"[{current_label}]ass=filename={ass_path_arg}:fontsdir={fonts_dir_arg}[vout]"
     )
 
+    # --- 音声側: セリフに加えてBGM・ページめくり音を混ぜる ---
+    audio_labels = ["1:a:0"]
+
+    if bgm_path and Path(bgm_path).exists():
+        print(f"  BGMを合成します: {bgm_path}")
+        # -stream_loop -1 で無限ループ入力にし、atrimで動画の長さぴったりに
+        # 切り詰める(=BGMが動画より短くても自動的に連続再生される)
+        ffmpeg_inputs += ["-stream_loop", "-1", "-i", str(Path(bgm_path).resolve())]
+        bgm_idx = input_index
+        input_index += 1
+        fade_out_start = max(0.0, total_duration - BGM_FADE_SECONDS)
+        filter_stages.append(
+            f"[{bgm_idx}:a]atrim=0:{total_duration:.3f},asetpts=PTS-STARTPTS,"
+            f"afade=t=in:st=0:d={BGM_FADE_SECONDS},"
+            f"afade=t=out:st={fade_out_start:.3f}:d={BGM_FADE_SECONDS},"
+            f"volume={BGM_VOLUME}[bgm]"
+        )
+        audio_labels.append("bgm")
+    elif bgm_path:
+        print(f"  [警告] BGMファイルが見つかりません: {bgm_path}（BGM無しで続行します）")
+
+    transition_times = _compute_slide_transition_times(visual_timeline) if page_turn_sound else []
+    if transition_times and PAGE_TURN_SFX_PATH.exists():
+        print(f"  ページめくり音を{len(transition_times)}箇所に合成します")
+        ffmpeg_inputs += ["-i", str(PAGE_TURN_SFX_PATH)]
+        sfx_idx = input_index
+        input_index += 1
+
+        if len(transition_times) == 1:
+            delay_ms = int(transition_times[0] * 1000)
+            filter_stages.append(
+                f"[{sfx_idx}:a]adelay={delay_ms}:all=1,volume={PAGE_TURN_VOLUME}[se_mixed]"
+            )
+        else:
+            split_labels = "".join(f"[se{i}]" for i in range(len(transition_times)))
+            filter_stages.append(f"[{sfx_idx}:a]asplit={len(transition_times)}{split_labels}")
+            delayed_refs = []
+            for i, t in enumerate(transition_times):
+                delay_ms = int(t * 1000)
+                filter_stages.append(f"[se{i}]adelay={delay_ms}:all=1[sed{i}]")
+                delayed_refs.append(f"[sed{i}]")
+            filter_stages.append(
+                "".join(delayed_refs)
+                + f"amix=inputs={len(transition_times)}:duration=longest:normalize=0,"
+                f"volume={PAGE_TURN_VOLUME}[se_mixed]"
+            )
+        audio_labels.append("se_mixed")
+
+    if len(audio_labels) == 1:
+        audio_map_args = ["-map", audio_labels[0]]
+    else:
+        mix_inputs = "".join(f"[{label}]" for label in audio_labels)
+        filter_stages.append(
+            f"{mix_inputs}amix=inputs={len(audio_labels)}:duration=first:normalize=0[aout]"
+        )
+        audio_map_args = ["-map", "[aout]"]
+
     _run_ffmpeg(
         [
             *ffmpeg_inputs,
             "-filter_complex", ";".join(filter_stages),
-            "-map", "[vout]", "-map", "1:a:0",
+            "-map", "[vout]", *audio_map_args,
             "-c:v", "libx264", "-pix_fmt", "yuv420p",
             "-c:a", "aac",
             "-shortest",

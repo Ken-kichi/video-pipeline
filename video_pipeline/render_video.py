@@ -8,20 +8,31 @@
 無ければ従来通りスライドのタイトル画面を使う。`--no-thumbnail-intro`で
 この挙動を無効化できる。
 
+BGMは`video_pipeline/assets/bgm/`に置いたファイルから対話的に選べる
+(著作権の都合上、BGMファイル自体は同梱していない。各自で用意する)。
+動画より短ければ自動でループし、動画全体の最初と最後に3秒ずつ
+フェードイン/アウトをかける。スライドが切り替わるタイミングには
+ページめくり音(同梱の効果音)を自動で鳴らす。BGM・ページめくり音は
+どちらもセリフの音声より小さい音量にしている。
+
 使い方:
   uv run render-video --script output/20260731_153000/script.md \
     --slides-dir output/20260731_153000/slides \
-    --output output/20260731_153000/final_video.mp4
+    --output output/20260731_153000/final_video.mp4 \
+    --bgm video_pipeline/assets/bgm/my_bgm.mp3
 
   # または、output/*/ から対話的に1回選ぶだけで上記3つが自動的に決まる
+  # (BGMも対話的に選べる)
   uv run render-video
 """
 
 import argparse
 from pathlib import Path
 
-from video_pipeline.interactive import pick_output_run, resolve_base_url
+from video_pipeline.interactive import pick_bgm_file, pick_output_run, resolve_base_url
 from video_pipeline.video_assembler import DEFAULT_BASE_URL, assemble_video
+
+BGM_DIR = Path(__file__).parent / "assets" / "bgm"
 
 
 def main() -> None:
@@ -48,6 +59,22 @@ def main() -> None:
         "--no-thumbnail-intro",
         action="store_true",
         help="サムネイルを動画冒頭に使わず、従来通りスライドのタイトル画面を使う",
+    )
+    parser.add_argument(
+        "--bgm",
+        default=None,
+        help="BGMファイルのパス。省略するとvideo_pipeline/assets/bgm/から対話的に選べる"
+        "(候補が無ければBGM無しで続行する)",
+    )
+    parser.add_argument(
+        "--no-bgm",
+        action="store_true",
+        help="BGMを使わない(対話選択もスキップする)",
+    )
+    parser.add_argument(
+        "--no-page-turn-sound",
+        action="store_true",
+        help="スライド切り替え時のページめくり音を鳴らさない",
     )
     parser.add_argument(
         "--work-dir",
@@ -93,6 +120,12 @@ def main() -> None:
         else:
             print(f"動画冒頭にサムネイルを使用します: {thumbnail_path}")
 
+    bgm_path = None
+    if not args.no_bgm:
+        bgm_path = Path(args.bgm) if args.bgm else pick_bgm_file(BGM_DIR)
+        if bgm_path:
+            print(f"BGMを使用します: {bgm_path}")
+
     base_url = resolve_base_url(args.base_url, DEFAULT_BASE_URL)
 
     try:
@@ -103,6 +136,8 @@ def main() -> None:
             work_dir=args.work_dir,
             base_url=base_url,
             thumbnail_path=thumbnail_path,
+            bgm_path=bgm_path,
+            page_turn_sound=not args.no_page_turn_sound,
         )
     except Exception as exc:  # noqa: BLE001 CLIとして分かりやすいエラー表示にするため
         print(

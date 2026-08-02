@@ -118,3 +118,30 @@ def pick_output_run(output_base: str | Path = "output") -> Path | None:
         return None
     index = labels.index(choice)
     return runs[index]
+
+
+_BGM_EXTENSIONS = (".mp3", ".wav", ".m4a")
+
+
+def list_bgm_files(bgm_dir: str | Path) -> list[Path]:
+    """BGMディレクトリ内の音声ファイル一覧を、名前順で返す。"""
+    bgm_dir = Path(bgm_dir)
+    if not bgm_dir.exists():
+        return []
+    files = [p for p in bgm_dir.iterdir() if p.suffix.lower() in _BGM_EXTENSIONS]
+    return sorted(files, key=lambda p: p.name)
+
+
+def pick_bgm_file(bgm_dir: str | Path) -> Path | None:
+    """BGMファイルを対話的に選ばせる。「使わない」を選んだ場合や候補が無い場合はNone。"""
+    bgm_dir = Path(bgm_dir)
+    files = list_bgm_files(bgm_dir)
+    if not files:
+        return None
+
+    no_bgm_label = "BGMを使わない"
+    choices = [no_bgm_label] + [f.name for f in files]
+    choice = select_from_list(choices, "BGMを選んでください:")
+    if choice is None or choice == no_bgm_label:
+        return None
+    return bgm_dir / choice
