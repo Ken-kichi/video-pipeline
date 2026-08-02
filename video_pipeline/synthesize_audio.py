@@ -5,11 +5,13 @@
 
 使い方:
   uv run voicevox-synthesize --input output/20260731_153000/voicevox_script.txt
+  uv run voicevox-synthesize    # --inputを省略するとoutput/*/から矢印キーで選べる
 """
 
 import argparse
 from pathlib import Path
 
+from video_pipeline.interactive import pick_output_run, resolve_base_url
 from video_pipeline.voicevox_client import DEFAULT_BASE_URL, synthesize_script_file
 
 
@@ -17,7 +19,11 @@ def main() -> None:
     parser = argparse.ArgumentParser(
         description="VOICEVOX ENGINE(ローカル)でvoicevox_script.txtから音声を一括生成する"
     )
-    parser.add_argument("--input", required=True, help="voicevox_script.txtのパス")
+    parser.add_argument(
+        "--input",
+        default=None,
+        help="voicevox_script.txtのパス。省略するとoutput/*/から対話的に選べる",
+    )
     parser.add_argument(
         "--output-dir",
         default=None,
@@ -25,21 +31,32 @@ def main() -> None:
     )
     parser.add_argument(
         "--base-url",
-        default=DEFAULT_BASE_URL,
-        help=f"VOICEVOX ENGINEのURL（デフォルト: {DEFAULT_BASE_URL}）",
+        default=None,
+        help=f"VOICEVOX ENGINEのURL。未指定なら対話的に選べる（デフォルト: {DEFAULT_BASE_URL}）",
     )
     args = parser.parse_args()
 
-    input_path = Path(args.input)
+    input_path = Path(args.input) if args.input else None
+    if input_path is None:
+        run_dir = pick_output_run()
+        if run_dir is None:
+            raise SystemExit(
+                "入力ファイルが指定されていません。--inputで指定するか、"
+                "output/ディレクトリに実行結果がある状態で対話端末から実行してください。"
+            )
+        input_path = run_dir / "voicevox_script.txt"
+        print(f"選択された実行結果: {run_dir.name}")
+
     if not input_path.exists():
         raise FileNotFoundError(f"入力ファイルが見つかりません: {input_path}")
 
+    base_url = resolve_base_url(args.base_url, DEFAULT_BASE_URL)
     voicevox_text = input_path.read_text(encoding="utf-8")
     output_dir = Path(args.output_dir) if args.output_dir else input_path.parent / "audio"
 
-    print(f"VOICEVOX ENGINE ({args.base_url}) に接続して音声を生成します...")
+    print(f"VOICEVOX ENGINE ({base_url}) に接続して音声を生成します...")
     try:
-        paths = synthesize_script_file(voicevox_text, output_dir, base_url=args.base_url)
+        paths = synthesize_script_file(voicevox_text, output_dir, base_url=base_url)
     except Exception as exc:  # noqa: BLE001 CLIとして分かりやすいエラー表示にするため
         print(
             f"\n[エラー] 音声生成に失敗しました: {exc}\n"

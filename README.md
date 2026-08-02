@@ -51,12 +51,22 @@ cp .env.example .env
 
 ## 実行方法
 
+3つのCLI（`video-pipeline` / `voicevox-synthesize` / `render-video`）は、
+引数（パス指定の`--input`/`--script`系だけでなく、`--title`・`--article-url`・
+`--generate-images`・`--base-url`のようなオプションも含む）を省略すると、
+対話端末上で矢印キー選択できるメニューが出る。「自動でよいか／自分で指定するか」
+を選び、指定する場合だけテキスト入力を求められる形にしているので、使わない
+オプションのために毎回何かを入力する必要は無い。非対話環境（パイプ実行など）で
+省略した場合は、ハングせず今まで通りのデフォルト動作にフォールバックする。
+個別の引数を明示的に指定すればその値がそのまま使われ、対話プロンプトは出ない
+（スクリプトからの呼び出しなど、これまで通りの使い方も可能）。
+
 ```bash
 uv run video-pipeline --input articles/sample.md --title "機械学習ってなに？" \
   --article-url "https://zenn.dev/xxxxx/articles/xxxxx" \
   --generate-images
-# または
-uv run python -m video_pipeline.main --input articles/sample.md
+# または、全て対話的に選ぶ(記事選択→タイトル→URL→背景生成の有無、の順に聞かれる)
+uv run video-pipeline
 ```
 
 `--title` を省略した場合、記事の見出し1（`# 〜`で始まる行）を自動でタイトルに使う。
@@ -80,6 +90,8 @@ VOICEVOXアプリを起動しておくと（実体はHTTPサーバとして動�
 
 ```bash
 uv run voicevox-synthesize --input output/20260731_153000/voicevox_script.txt
+# または、output/*/から対話的に選ぶ
+uv run voicevox-synthesize
 ```
 
 出力先を省略すると、入力ファイルと同じ場所の`audio/`に保存される
@@ -108,6 +120,9 @@ uv run render-video \
   --script output/20260731_153000/script.md \
   --slides-dir output/20260731_153000/slides \
   --output output/20260731_153000/final_video.mp4
+
+# または、output/*/から対話的に1回選ぶだけで上記3つのパスが自動的に決まる
+uv run render-video
 ```
 
 流れ:
@@ -171,6 +186,7 @@ video_pipeline/
 ├── image_generator.py    # Gemini(Nano Banana系)によるスライド背景生成
 ├── voicevox_client.py     # ローカルVOICEVOX ENGINEのHTTP APIクライアント
 ├── script_parser.py       # script.mdをシーン・セリフに決定的にパース(正規表現)
+├── interactive.py         # 矢印キー選択メニュー(questionary)。articles/やoutput/の選択に使う
 ├── video_assembler.py     # 台本+スライド+音声から字幕付き動画をffmpegで組み立て
 ├── io_utils.py            # ファイル入出力
 ├── loop.py                # 生成→評価→修正ループの共通ロジック
