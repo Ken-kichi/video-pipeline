@@ -492,6 +492,7 @@ def build_slide_images(
 
     title_path = build_title_slide(
         title,
+        "",
         output_dir / "slide_00_title.png",
         background_path=title_background_path,
     )
