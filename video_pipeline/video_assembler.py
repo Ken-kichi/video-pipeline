@@ -13,12 +13,17 @@ ASS(Advanced SubStation Alpha)形式の字幕を生成し、ffmpegの`ass`フィ
      どのセリフがどのシーン=どのスライドに対応するかを確実にするため)
   2. 各セリフをVOICEVOX ENGINEで直接音声合成し、長さを計測。セリフ間には
      自然な会話に見えるよう無音の"間"(PAUSE_BETWEEN_LINES_SECONDS)を挿入する
+     (話者+セリフ内容でキャッシュするため、同じ台本での再実行時は再合成しない)
   3. slides/manifest.jsonのscene_numberから、各スライドの表示時間を計算
      (シーンの開始〜次のシーンの開始までの実時間を使い、セリフ間の"間"も
      取りこぼさないようにする)
   4. セリフごとのタイミングでASS字幕(話者別に色分け)を生成
-  5. ffmpegで (a)音声を結合 (b)スライド画像を表示時間通りに並べた無音動画を作成
-     (c) 動画+音声+字幕を1本のmp4に合成
+  5. (任意) assets/characters/に立ち絵の口開閉2状態(closed/open)のPNGが
+     揃っていれば、そのキャラクターが喋っている区間だけ口を開いた画像に
+     切り替えるオーバーレイをffmpegのoverlay+enableで合成する
+     (画像はcharacter_renderer.pyでPSD立ち絵素材から書き出す)
+  6. ffmpegで (a)音声を結合 (b)スライド画像を表示時間通りに並べた無音動画を作成
+     (c) 動画+音声+字幕(+キャラクター)を1本のmp4に合成
 
 タイミングの一致について(重要):
   音声トラック・字幕・スライド表示時間は、すべて同じ「cursor」の積み上げ
@@ -28,6 +33,7 @@ ASS(Advanced SubStation Alpha)形式の字幕を生成し、ffmpegの`ass`フィ
   不具合があった。
 """
 
+import hashlib
 import json
 import subprocess
 import wave
@@ -46,6 +52,7 @@ from video_pipeline.voicevox_client import (
 )
 
 FONTS_DIR = Path(__file__).parent / "assets" / "fonts"
+CHARACTER_ASSETS_DIR = Path(__file__).parent / "assets" / "characters"
 
 # 話者ごとの字幕色(ASS形式 &HAABBGGRR)。黄色系/緑系。
 SUBTITLE_STYLE_COLORS = {
@@ -53,6 +60,12 @@ SUBTITLE_STYLE_COLORS = {
     "ずんだもん": "&H0055AA55",  # 緑系 (R85,G170,B85)
 }
 DEFAULT_STYLE_COLOR = "&H00FFFFFF"  # 白(未知の話者向けフォールバック)
+
+# キャラクター立ち絵の画面上の配置(つむぎ=左下、ずんだもん=右下)と
+# ファイル名の接頭辞(prepare_characters.pyの出力先と対応させる)。
+CHARACTER_PREFIXES = {"つむぎ": "tsumugi", "ずんだもん": "zundamon"}
+CHARACTER_POSITIONS = {"つむぎ": "left", "ずんだもん": "right"}
+CHARACTER_MARGIN_X = 40
 
 VIDEO_WIDTH = 1920
 VIDEO_HEIGHT = 1080
@@ -86,6 +99,31 @@ def _wav_duration_seconds(path: Path) -> float:
         frames = wf.getnframes()
         rate = wf.getframerate()
         return frames / float(rate)
+
+
+def _character_asset_paths() -> dict[str, dict[str, Path]]:
+    """assets/characters/に口の開閉2状態(closed/open)が揃っているキャラクターだけ返す。
+
+    PSD素材を用意していないユーザー向けに、片方または両方揃っていなければ
+    そのキャラクターのオーバーレイは単純にスキップされる(エラーにはしない)。
+    """
+    assets: dict[str, dict[str, Path]] = {}
+    for speaker, prefix in CHARACTER_PREFIXES.items():
+        closed = CHARACTER_ASSETS_DIR / f"{prefix}_closed.png"
+        open_ = CHARACTER_ASSETS_DIR / f"{prefix}_open.png"
+        if closed.exists() and open_.exists():
+            assets[speaker] = {"closed": closed, "open": open_}
+    return assets
+
+
+def _build_enable_expr(intervals: list[tuple[float, float]]) -> str:
+    """between(t,s,e)の和で、ffmpegのenableオプション用の式を作る。
+
+    区間が1つも無ければ常に偽("0")を返す。
+    """
+    if not intervals:
+        return "0"
+    return "+".join(f"between(t,{start:.3f},{end:.3f})" for start, end in intervals)
 
 
 def _write_silence_wav(path: Path, duration_seconds: float, reference_wav_path: Path) -> Path:
@@ -162,6 +200,8 @@ def synthesize_timeline(
     style_map = style_map or {}
     work_dir = Path(work_dir)
     work_dir.mkdir(parents=True, exist_ok=True)
+    cache_dir = work_dir / "_cache"
+    cache_dir.mkdir(parents=True, exist_ok=True)
 
     scenes = parse_script(script_text)
     if not scenes:
@@ -187,10 +227,22 @@ def synthesize_timeline(
         speaker_id = speaker_id_cache[line.speaker]
 
         index = i + 1
-        print(f"  {index:03d}: [シーン{line.scene_number}/{line.speaker}] {line.text[:30]}...")
-        wav_bytes = synthesize(line.text, speaker_id, base_url)
+        # 話者+セリフ本文のハッシュでキャッシュする。同じscript.mdに対して
+        # render-videoを何度も再実行しても(ffmpeg側の試行錯誤などで)、
+        # 内容が変わっていないセリフはVOICEVOXへの再合成をスキップする。
+        cache_key = hashlib.sha256(f"{speaker_id}:{line.text}".encode("utf-8")).hexdigest()[:16]
+        cached_path = cache_dir / f"{cache_key}.wav"
         audio_path = work_dir / f"line_{index:04d}.wav"
-        audio_path.write_bytes(wav_bytes)
+
+        if cached_path.exists():
+            print(f"  {index:03d}: [シーン{line.scene_number}/{line.speaker}] {line.text[:30]}... (キャッシュ利用)")
+            audio_path.write_bytes(cached_path.read_bytes())
+        else:
+            print(f"  {index:03d}: [シーン{line.scene_number}/{line.speaker}] {line.text[:30]}...")
+            wav_bytes = synthesize(line.text, speaker_id, base_url)
+            cached_path.write_bytes(wav_bytes)
+            audio_path.write_bytes(wav_bytes)
+
         if reference_audio_path is None:
             reference_audio_path = audio_path
 
@@ -462,12 +514,56 @@ def assemble_video(
     print("=== 音声・映像・字幕を合成中 ===")
     ass_path_arg = _quote_ffmpeg_filter_value(str(ass_path.resolve()))
     fonts_dir_arg = _quote_ffmpeg_filter_value(str(FONTS_DIR.resolve()))
+
+    character_assets = _character_asset_paths()
+    if character_assets:
+        print(f"  立ち絵オーバーレイを合成します: {', '.join(character_assets)}")
+
+    ffmpeg_inputs = ["-i", str(silent_video_path), "-i", str(full_audio_path)]
+    current_label = "0:v"
+    input_index = 2  # 0=映像, 1=音声。キャラクター画像はこの続きから追加する
+    filter_stages: list[str] = []
+
+    for speaker, assets in character_assets.items():
+        position = CHARACTER_POSITIONS.get(speaker, "left")
+        x_expr = (
+            str(CHARACTER_MARGIN_X)
+            if position == "left"
+            else f"main_w-overlay_w-{CHARACTER_MARGIN_X}"
+        )
+        y_expr = "main_h-overlay_h"
+        intervals = [(item.start, item.end) for item in timeline if item.speaker == speaker]
+        enable_expr = _build_enable_expr(intervals)
+
+        ffmpeg_inputs += ["-i", str(assets["closed"])]
+        closed_idx = input_index
+        input_index += 1
+        ffmpeg_inputs += ["-i", str(assets["open"])]
+        open_idx = input_index
+        input_index += 1
+
+        bg_closed_label = f"bg{input_index}c"
+        bg_open_label = f"bg{input_index}o"
+        # まず口を閉じた状態を常時オーバーレイ(=待機中のデフォルト表示)、
+        # その上に口を開いた状態を、そのキャラクターが喋っている区間だけ重ねる
+        filter_stages.append(
+            f"[{current_label}][{closed_idx}:v]overlay=x={x_expr}:y={y_expr}[{bg_closed_label}]"
+        )
+        filter_stages.append(
+            f"[{bg_closed_label}][{open_idx}:v]overlay=x={x_expr}:y={y_expr}:"
+            f"enable='{enable_expr}'[{bg_open_label}]"
+        )
+        current_label = bg_open_label
+
+    filter_stages.append(
+        f"[{current_label}]ass=filename={ass_path_arg}:fontsdir={fonts_dir_arg}[vout]"
+    )
+
     _run_ffmpeg(
         [
-            "-i", str(silent_video_path),
-            "-i", str(full_audio_path),
-            "-vf", f"ass=filename={ass_path_arg}:fontsdir={fonts_dir_arg}",
-            "-map", "0:v:0", "-map", "1:a:0",
+            *ffmpeg_inputs,
+            "-filter_complex", ";".join(filter_stages),
+            "-map", "[vout]", "-map", "1:a:0",
             "-c:v", "libx264", "-pix_fmt", "yuv420p",
             "-c:a", "aac",
             "-shortest",

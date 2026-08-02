@@ -8,6 +8,8 @@ dependencies = [
     "anthropic>=0.120.2",
     "google-genai>=2.16.0",
     "pillow>=12.3.0",
+    "psd-tools>=1.17.4",
+    "pygments>=2.20.0",
     "python-dotenv>=1.2.2",
     "questionary>=2.1.1",
     "requests>=2.34.2",
@@ -17,6 +19,7 @@ dependencies = [
 video-pipeline = "video_pipeline.main:main"
 voicevox-synthesize = "video_pipeline.synthesize_audio:main"
 render-video = "video_pipeline.render_video:main"
+prepare-characters = "video_pipeline.prepare_characters:main"
 
 [build-system]
 requires = ["hatchling"]

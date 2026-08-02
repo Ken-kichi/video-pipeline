@@ -71,11 +71,38 @@ def resolve_speaker_id(
     raise ValueError(f"話者「{matched_speaker.get('name')}」にスタイルが登録されていません")
 
 
+# 字幕には残したいが読み上げには不要な、非言語的な表現。カッコの中に
+# これらの語だけが入っている場合に取り除く(例: 「（笑）」がそのまま
+# 音声合成され「わらい」と読まれてしまう不具合の対策)。
+_NON_VERBAL_PATTERN = re.compile(r"[（(](笑|苦笑|汗|涙|驚き|ため息)[）)]")
+
+# 読み間違いが分かっている単語の読み補正。キーは元のテキスト、値は読み上げ用に
+# 差し替えるかな表記。字幕には影響しない(音声合成に渡す直前だけ差し替える)。
+# 例: 「空の箱」の「空」がデフォルトで「そら」と読まれ「そらの箱」に
+# なってしまう不具合の対策(正しくは「からの箱」)。
+READING_OVERRIDES: dict[str, str] = {
+    "空の": "からの",
+}
+
+
+def _prepare_synthesis_text(text: str) -> str:
+    """音声合成に渡す直前のテキスト整形(字幕表示用のtextとは別に扱う)。"""
+    cleaned = _NON_VERBAL_PATTERN.sub("", text)
+    for original, reading in READING_OVERRIDES.items():
+        cleaned = cleaned.replace(original, reading)
+    return cleaned
+
+
 def synthesize(text: str, speaker_id: int, base_url: str = DEFAULT_BASE_URL) -> bytes:
-    """1行分のテキストをWAV音声(bytes)に変換する。"""
+    """1行分のテキストをWAV音声(bytes)に変換する。
+
+    textには字幕用の元の表記(「（笑）」や「空の箱」等)がそのまま渡ってきて構わない。
+    音声合成にだけ影響する整形(_prepare_synthesis_text)をここで適用する。
+    """
+    synthesis_text = _prepare_synthesis_text(text)
     query_response = requests.post(
         f"{base_url}/audio_query",
-        params={"text": text, "speaker": speaker_id},
+        params={"text": synthesis_text, "speaker": speaker_id},
         timeout=30,
     )
     query_response.raise_for_status()

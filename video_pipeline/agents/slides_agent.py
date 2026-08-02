@@ -1,17 +1,20 @@
 """動画にあわせて画面に出すスライドの内容を生成・評価・修正するエージェント。
 
 生成物はslide_image_builderでそのまま描画できるよう、layoutフィールドで
-4種類のレイアウトのいずれかを指定する構造で扱う:
+6種類のレイアウトのいずれかを指定する構造で扱う:
 - bullets:     タイトル+箇条書き(従来の標準レイアウト)
 - stat:        1つの数値・指標を大きく見せる(例: 0.79 -> 0.83)
 - quote:       1行のキーメッセージを大きく見せる
 - comparison:  2つの対象を左右に並べて比較する
+- code:        記事中の実際のコードブロックをシンタックスハイライト付きで表示
+- diagram:     記事中の実際のmermaid図を画像として表示
 
 どのレイアウトにも background_prompt（背景に敷く抽象イラストの生成プロンプト、
 文字・数字は含めない）と scene_number（台本のシーン番号。動画組み立て時に
 音声とスライドを対応させるための機械可読な値）を持たせる。実際のテキストは
 背景の上にPillowで正確に描画するため、背景画像に数値やコードの正確性を
-求める必要はない。
+求める必要はない。code/diagramはbackground_promptを使わない(記事そのものの
+コード/図が主役のため)。
 """
 
 import json
@@ -26,7 +29,7 @@ GENERATE_SYSTEM = """あなたは技術解説動画のスライド構成担当�
 元記事と動画台本をもとに、画面に表示するスライドの内容を作成してください。
 
 NotebookLMのVideo Overviewのように、内容によってスライドのレイアウトを
-変えることで単調さをなくします。各スライドについて、以下4種類の中から
+変えることで単調さをなくします。各スライドについて、以下6種類の中から
 最も内容に合うlayoutを1つ選んでください。
 
 ## layout: "bullets"（標準。箇条書きで説明する内容）
@@ -44,6 +47,18 @@ NotebookLMのVideo Overviewのように、内容によってスライドのレ�
 
 ## layout: "comparison"（2つの対象を対比させたいスライド。例: 汎用AI vs 自前モデル）
 {"layout": "comparison", "scene_number": 1, "title": "...", "left_label": "...", "left_bullets": ["...", "..."], "right_label": "...", "right_bullets": ["...", "..."], "notes": "...", "background_prompt": "..."}
+
+## layout: "code"（台本のセリフで記事中の具体的なコードに言及しているスライド）
+{"layout": "code", "scene_number": 1, "title": "...", "code_ref": 0, "caption": "...", "notes": "..."}
+- code_refは、渡された「記事中のコードブロック一覧」に書かれているcode_refの
+  番号をそのまま使う(創作禁止。存在しない番号を使わない)
+- captionはそのコードの要点を一言で(無ければ空文字)。background_promptは使わない
+
+## layout: "diagram"（台本のセリフで記事中の具体的な図(mermaid)に言及しているスライド）
+{"layout": "diagram", "scene_number": 1, "title": "...", "diagram_ref": 0, "caption": "...", "notes": "..."}
+- diagram_refは、渡された「記事中のmermaid図一覧」に書かれているdiagram_refの
+  番号をそのまま使う(創作禁止。存在しない番号を使わない)
+- captionはその図の要点を一言で(無ければ空文字)。background_promptは使わない
 
 scene_numberについて（重要）:
 - 台本の見出し「### シーン<N>：〜」の<N>の数字をそのまま入れる
@@ -66,14 +81,24 @@ scene_numberについて（重要）:
   - "comparison"レイアウトを最低1枚は使う。台本中で2つの対象を
     対比している箇所（AとBの比較、旧と新、メリットとデメリットなど）を
     担当するスライドは"bullets"ではなく"comparison"にする
-  - 上記3つを合計して全体の1〜3割程度、残りを"bullets"にする
-    （動画全体でstat/quote/comparisonが1枚も無いのは失格。使いすぎて
+  - 【重要】台本のセリフが記事中の具体的なコードに言及しているシーンでは
+    "bullets"で説明を書くのではなく、渡された「記事中のコードブロック一覧」
+    から該当するcode_refを選んで"code"レイアウトにする
+  - 【重要】台本のセリフが記事中の具体的なmermaid図に言及しているシーンでは
+    同様に「記事中のmermaid図一覧」から該当するdiagram_refを選んで
+    "diagram"レイアウトにする
+  - コードブロック/mermaid図が渡されていない場合や、台本がどれにも
+    具体的に言及していない場合は、code/diagramレイアウトを使わなくてよい
+    (存在しないcode_ref/diagram_refを創作するより、bulletsにする方が良い)
+  - stat/quote/comparisonは合計して全体の1〜3割程度、残りをbullets/code/diagramに
+    する（動画全体でstat/quote/comparisonが1枚も無いのは失格。使いすぎて
     散漫になるのも避ける）
 - 箇条書きは体言止め・短文中心にし、長い説明文をそのまま貼らない
-- 図解（mermaidのフローチャートなど）や表を説明するスライドは、
-  bulletsにその要点を言葉で書く（図そのものの画像は後工程で人間が挿入する前提）
+- 図解（mermaidのフローチャートなど）や表を説明するスライドで、対応する
+  mermaid図が渡されていない場合は、bulletsにその要点を言葉で書く
 
-background_promptについて（重要。全レイアウト共通、ほぼ全スライドで書く）:
+background_promptについて（重要。bullets/stat/quote/comparisonで使用。
+code/diagramでは使わない）:
 - これはスライド全体の背景に敷く抽象的なイラストの生成プロンプト。
   この上に文字を重ねて描画するので、背景画像自体に文字・数字・記号を
   描かせる指示は絶対に入れない（画像生成モデルは文字を正確に描けないため。
@@ -99,6 +124,11 @@ EVALUATE_SYSTEM = """あなたはスライド構成のレビュアーです。�
 - 【重要】"stat"・"quote"・"comparison"それぞれが最低1枚以上使われているか。
   1枚も無いレイアウトがあれば必ず大きく減点し、台本のどの部分をそのレイアウトに
   すべきか具体的にフィードバックに書く（例:「シーン10の0.79→0.83の箇所をstatに」）
+- 【重要】台本のセリフが記事中の具体的なコード/mermaid図に言及しているのに、
+  対応する"code"/"diagram"レイアウトを使わず"bullets"で済ませているスライドが
+  無いか。あれば減点し、該当するcode_ref/diagram_refを指摘する
+- code_ref/diagram_refが、渡された一覧に実在する番号か（存在しない番号を
+  創作していたら大きく減点する）
 - layoutの選び方が内容に合っているか（単なる箇条書きで済む内容にstat/quoteを
   無理に使っていないか、逆に強調すべき数値やキーメッセージがbulletsに埋もれて
   いないか）。"stat"/"quote"/"comparison"を使いすぎて散漫になっていないか
@@ -114,8 +144,9 @@ JSON形式 {"score": <int>, "feedback": "<改善点。問題なければ空文�
 
 REVISE_SYSTEM = """あなたはスライド構成の修正担当です。フィードバックに基づいて
 スライド内容を修正してください。各スライドは"layout"フィールド
-("bullets"/"stat"/"quote"/"comparison"のいずれか)と、台本のシーン番号と
-一致した"scene_number"(整数)を持つ構造を維持してください。
+("bullets"/"stat"/"quote"/"comparison"/"code"/"diagram"のいずれか)と、
+台本のシーン番号と一致した"scene_number"(整数)を持つ構造を維持してください。
+code_ref/diagram_refは渡された一覧に実在する番号だけを使ってください。
 出力はJSONのみ: {"slides": [<layoutに応じた形式のオブジェクト>, ...]}
 """
 
@@ -124,37 +155,45 @@ def _slides_to_text(slides: list[dict]) -> str:
     return json.dumps({"slides": slides}, ensure_ascii=False, indent=2)
 
 
-def generate(article_text: str, script: str) -> list[dict]:
+def generate(article_text: str, script: str, asset_summary: str = "") -> list[dict]:
+    asset_block = f"\n\n{asset_summary}\n" if asset_summary else ""
     user = (
-        f"# 元記事\n\n{article_text}\n\n# 動画台本\n\n{script}\n\n"
+        f"# 元記事\n\n{article_text}\n\n# 動画台本\n\n{script}\n{asset_block}\n"
         "上記をもとにスライド内容を作成してください。"
     )
     result = call_json(GENERATE_SYSTEM, user, model=MODEL_GENERATE)
     return result["slides"]
 
 
-def evaluate(article_text: str, script: str, slides: list[dict]) -> dict:
+def evaluate(article_text: str, script: str, slides: list[dict], asset_summary: str = "") -> dict:
+    asset_block = f"\n\n{asset_summary}\n" if asset_summary else ""
     user = (
-        f"# 元記事\n\n{article_text}\n\n# 動画台本\n\n{script}\n\n"
+        f"# 元記事\n\n{article_text}\n\n# 動画台本\n\n{script}\n{asset_block}\n"
         f"# 現在のスライド内容\n\n{_slides_to_text(slides)}\n\n上記を評価してください。"
     )
     return call_json(EVALUATE_SYSTEM, user, model=MODEL_EVALUATE)
 
 
-def revise(script: str, slides: list[dict], feedback: str) -> list[dict]:
+def revise(script: str, slides: list[dict], feedback: str, asset_summary: str = "") -> list[dict]:
+    asset_block = f"\n\n{asset_summary}\n" if asset_summary else ""
     user = (
-        f"# 動画台本\n\n{script}\n\n# 現在のスライド内容\n\n{_slides_to_text(slides)}\n\n"
+        f"# 動画台本\n\n{script}\n{asset_block}\n# 現在のスライド内容\n\n{_slides_to_text(slides)}\n\n"
         f"# フィードバック\n\n{feedback}\n\n上記フィードバックを反映してスライド内容を修正してください。"
     )
     result = call_json(REVISE_SYSTEM, user, model=MODEL_GENERATE)
     return result["slides"]
 
 
-def run(article_text: str, script: str) -> tuple[list[dict], int, list[dict]]:
-    """スライド内容の生成→評価→修正ループを実行する。"""
+def run(article_text: str, script: str, asset_summary: str = "") -> tuple[list[dict], int, list[dict]]:
+    """スライド内容の生成→評価→修正ループを実行する。
+
+    asset_summaryはarticle_assets.summarize_for_prompt()で作った、記事中の
+    コードブロック/mermaid図の一覧(あれば)。無ければ空文字のままでよく、
+    その場合はcode/diagramレイアウトは使われない。
+    """
     return run_with_evaluation_loop(
         label=LABEL,
-        generate=lambda: generate(article_text, script),
-        evaluate=lambda slides: evaluate(article_text, script, slides),
-        revise=lambda slides, feedback: revise(script, slides, feedback),
+        generate=lambda: generate(article_text, script, asset_summary),
+        evaluate=lambda slides: evaluate(article_text, script, slides, asset_summary),
+        revise=lambda slides, feedback: revise(script, slides, feedback, asset_summary),
     )

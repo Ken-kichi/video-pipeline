@@ -131,7 +131,9 @@ uv run render-video
    （`voicevox_agent`のLLM抽出は経由しない。台本と音声・字幕を確実に一致させるため）
 2. 各セリフをVOICEVOX ENGINEで直接音声合成し、長さを計測。セリフ間には
    自然な会話に見えるよう0.4秒の無音の"間"を挿入する
-   (`video_assembler.PAUSE_BETWEEN_LINES_SECONDS`で調整可能)
+   (`video_assembler.PAUSE_BETWEEN_LINES_SECONDS`で調整可能)。話者+セリフ内容の
+   ハッシュでキャッシュするため、同じ台本に対して`render-video`を再実行しても
+   変わっていないセリフはVOICEVOXへ再合成しない
 3. `slides/manifest.json`の`scene_number`をもとに、各スライドの表示時間
    （＝そのシーンの開始〜次のシーンの開始までの実時間。セリフ間の"間"も
    取りこぼさない）を計算。1つのシーンに複数のスライドが割り当てられていれば
@@ -143,8 +145,18 @@ uv run render-video
    横幅(1760px = 1920px - 左右マージン80pxずつ)に収まるよう自動で複数行に
    折り返す（YouTubeの字幕のように2〜3行になる。ASS字幕はデフォルトでは
    自動折り返しされないため、これをしないと長いセリフが画面からはみ出す）
-5. ffmpegで (a)音声を結合 (b)スライド画像を表示時間通りに並べた無音動画を作成
-   (c) 動画+音声+字幕を1本のmp4に合成する
+5. (任意) `assets/characters/`に立ち絵の口開閉2状態のPNGが揃っていれば、
+   そのキャラクターが喋っている区間だけ口を開いた画像に切り替える
+   オーバーレイを合成する(下記「立ち絵オーバーレイ」参照)
+6. ffmpegで (a)音声を結合 (b)スライド画像を表示時間通りに並べた無音動画を作成
+   (c) 動画+音声+字幕(+立ち絵)を1本のmp4に合成する
+
+音声合成に渡す直前のテキストには、以下の補正も加えている(字幕表示には影響しない):
+- 「（笑）」「（汗）」のような非言語的な注釈をVOICEVOXへ渡す前に取り除く
+  （そのまま渡すと「わらい」のように読み上げられてしまう不具合の対策）
+- 「空の」→「からの」のように、既知の読み間違いを補正する
+  （「空の箱」が「そらの箱」と読まれてしまう不具合の対策。
+  `voicevox_client.READING_OVERRIDES`に追加すれば他の単語も補正できる）
 
 **音声・字幕・映像の時間を一致させる仕組み**: 3つとも同じ「cursor」の積み上げ
 （タイトル区間の無音 + 各セリフの実測時間 + セリフ間の"間"）から計算しており、
@@ -165,6 +177,37 @@ uv run render-video
 確実に一致させるための設計で、`voicevox-synthesize`（DaVinci Resolveで
 手動編集したい場合向け）とは独立した経路になっている。
 
+## 立ち絵オーバーレイ（任意）
+
+つむぎ・ずんだもんの立ち絵素材(PSD)を用意すると、喋っている方だけ口を開けた
+状態になる立ち絵をスライドの上に自動で合成できる(つむぎ=画面左下、
+ずんだもん=画面右下)。配布されている「立ち絵素材」PSDは、パーツごとの
+レイヤーグループの中に複数のバリエーションが並んでいる形式が多いので、
+`character_renderer.py`が口のレイヤーグループだけ差し替えて2枚(口を閉じた状態/
+開いた状態)を合成する。
+
+```bash
+uv run prepare-characters \
+  --tsumugi-psd 春日部つむぎ_立ち絵素材.psd \
+  --zundamon-psd ずんだもん立ち絵素材.psd
+```
+
+`video_pipeline/assets/characters/`に`tsumugi_closed.png`・`tsumugi_open.png`・
+`zundamon_closed.png`・`zundamon_open.png`が書き出され、以降`render-video`を
+実行するたびに自動で読み込まれる（これらのファイルが無い場合は、立ち絵無しで
+今まで通り動作する）。
+
+デフォルトの口レイヤー名（つむぎ=「ほほえみ」/「わあ」、ずんだもん=「んー」/
+「ほあー」）は、実際に確認した配布素材のレイヤー構成に基づく想定値。別の配布元の
+PSDや別の絵柄だと口のレイヤー名が異なる場合があるので、`--tsumugi-mouth-closed`
+のようなオプションで上書きできる（`uv run prepare-characters --help`参照）。
+
+合成の仕組みは、ffmpegの`overlay`フィルタを2段階重ねている: (1)口を閉じた画像を
+常時オーバーレイ(待機中のデフォルト表示) → (2)その上に、口を開いた画像を
+そのキャラクターが喋っている区間(`enable='between(t,開始,終了)+...'`)だけ
+重ねて表示する。実際に生成した動画で、話している区間と口の開閉が一致することを
+口周辺のピクセル比較で検証済み。
+
 ## 出力ファイル
 
 | ファイル | 内容 |
@@ -175,7 +218,7 @@ uv run render-video
 | `output/<実行時刻>/backgrounds/` | （背景生成有効時）Geminiで生成した背景イラストの元画像 |
 | `output/<実行時刻>/description.txt` | YouTube概要欄用テキスト（概要文・目次・元記事リンク・ハッシュタグ） |
 | `output/<実行時刻>/audio/` | （`voicevox-synthesize`実行後）セリフごとのWAV音声+manifest.json |
-| `output/<実行時刻>/final_video.mp4` | （`render-video`実行後）色分け字幕つきの完成動画 |
+| `output/<実行時刻>/final_video.mp4` | （`render-video`実行後）色分け字幕つき（立ち絵素材があれば口の開閉つき）の完成動画 |
 
 ## 構成
 
@@ -184,18 +227,24 @@ video_pipeline/
 ├── config.py            # モデル名・ループ回数・スコア閾値
 ├── claude_client.py      # Claude API呼び出しの共通処理（テキスト/JSON）
 ├── image_generator.py    # Gemini(Nano Banana系)によるスライド背景生成
-├── voicevox_client.py     # ローカルVOICEVOX ENGINEのHTTP APIクライアント
+├── voicevox_client.py     # ローカルVOICEVOX ENGINEのHTTP APIクライアント(テキスト補正も含む)
+├── character_renderer.py # 立ち絵PSDから口開閉2状態のPNGを合成(psd-tools)
+├── article_assets.py     # 記事からコードブロック・mermaid図を決定的に抽出
+├── code_renderer.py       # コードをシンタックスハイライト付き画像に描画(pygments)
+├── diagram_renderer.py    # mermaid図をmermaid.ink経由でPNG画像に変換
 ├── script_parser.py       # script.mdをシーン・セリフに決定的にパース(正規表現)
 ├── interactive.py         # 矢印キー選択メニュー(questionary)。articles/やoutput/の選択に使う
-├── video_assembler.py     # 台本+スライド+音声から字幕付き動画をffmpegで組み立て
+├── video_assembler.py     # 台本+スライド+音声(+立ち絵)から字幕付き動画をffmpegで組み立て
 ├── io_utils.py            # ファイル入出力
 ├── loop.py                # 生成→評価→修正ループの共通ロジック
 ├── slide_image_builder.py # スライド内容(JSON、4レイアウト対応) -> PNG画像(Pillowで直接描画)
 ├── assets/fonts/          # Noto Sans JP(スライド用:可変フォント、字幕用:静的Bold/Regular)
+├── assets/characters/     # prepare-charactersが書き出す立ち絵PNG(口開閉2状態×2キャラ)
 ├── pipeline.py            # 全体のオーケストレーション
 ├── main.py                # CLIエントリーポイント(video-pipeline)
 ├── synthesize_audio.py    # CLIエントリーポイント(voicevox-synthesize)
 ├── render_video.py        # CLIエントリーポイント(render-video)
+├── prepare_characters.py  # CLIエントリーポイント(prepare-characters)
 └── agents/
     ├── script_agent.py        # 台本の生成・評価・修正
     ├── slides_agent.py        # スライド内容(background_prompt, scene_number含む)の生成・評価・修正
@@ -243,6 +292,33 @@ VOICEVOXテキスト抽出のような機械的な作業は軽量モデルを割
 背景生成はほぼ全スライドに対して行われるため、`--generate-images`を使うと
 Gemini APIの呼び出し回数・コストが動画1本あたりスライド枚数分（10〜16回程度）
 発生する点は把握しておく。
+
+## 記事のコード・図をスライドに貼り付ける
+
+台本のセリフが記事中の具体的なコードやmermaid図に言及している場合、それを
+説明する文章をbulletsに書くのではなく、**記事に載っている実物**をスライドに
+表示できる。`video-pipeline`実行時に自動で行われる（オプション不要）。
+
+流れ:
+1. `article_assets.py`が記事のMarkdownを正規表現で決定的にパースし、
+   フェンス付きコードブロック(`python`などの言語指定つきコードブロック)と
+   mermaid図(`mermaid`指定のコードブロック)を、直前の見出しとあわせて抜き出す
+2. その一覧(`code_ref`/`diagram_ref`という番号付き)を`slides_agent`に渡し、
+   台本が具体的に言及しているスライドでは"code"/"diagram"レイアウトを選び、
+   該当する番号を参照させる（存在しない番号を創作することは禁止している）
+3. スライド内容が確定した後、`code_ref`/`diagram_ref`を実際の画像に解決する:
+   - コードは`code_renderer.py`がpygmentsでシンタックスハイライトした画像を
+     Pillowで直接描画する(等紙フォントはJetBrains Mono、日本語コメントが
+     混在してもNoto Sans JPで補完する)
+   - mermaid図は`diagram_renderer.py`が公開サービス
+     [mermaid.ink](https://mermaid.ink)にmermaid記法を送って画像を取得する
+     (ローカルにNode.js/ブラウザを用意しなくて済む)
+4. 参照番号が存在しない場合や、mermaid.inkへの接続に失敗した場合は、その
+   スライドを自動的に"bullets"にフォールバックする(動画組み立てを止めない)
+
+mermaid図のレンダリングは外部の公開サービスに依存するため、ネットワークが
+使えない環境では失敗してスキップされる(このサンドボックス環境では
+mermaid.inkに到達できず未検証。実際のネットワーク環境で確認してほしい)。
 
 ## トラブルシューティング
 

@@ -27,7 +27,10 @@ from video_pipeline.agents import (
     slides_agent,
     voicevox_agent,
 )
+from video_pipeline.article_assets import extract_article_assets, summarize_for_prompt
+from video_pipeline.code_renderer import render_code_image
 from video_pipeline.config import GENERATE_SLIDE_IMAGES, MAX_REVISION_LOOPS, SCORE_THRESHOLD
+from video_pipeline.diagram_renderer import render_mermaid_diagram
 from video_pipeline.image_generator import generate_slide_background
 from video_pipeline.io_utils import extract_h1_title, read_markdown, write_text_file
 from video_pipeline.slide_image_builder import build_slide_images
@@ -109,6 +112,48 @@ def _generate_slide_backgrounds(slides: list[dict], backgrounds_dir: Path) -> li
     return slides
 
 
+def _resolve_media_slides(
+    slides: list[dict], codes: list, diagrams: list, media_dir: Path
+) -> list[dict]:
+    """layoutが"code"/"diagram"のスライドについて、参照番号を実際の画像に解決する。
+
+    存在しない番号を参照している場合や画像の生成に失敗した場合は、
+    そのスライドをlayout="bullets"にフォールバックさせる(動画組み立てを
+    止めないため)。
+    """
+    for i, slide_data in enumerate(slides):
+        layout = slide_data.get("layout", "bullets")
+
+        if layout == "code":
+            ref = slide_data.get("code_ref")
+            block = codes[ref] if isinstance(ref, int) and 0 <= ref < len(codes) else None
+            if block is None:
+                print(f"  [警告] スライド{i + 1}のcode_ref={ref}が見つかりません。bulletsにフォールバックします。")
+                slide_data["layout"] = "bullets"
+                slide_data["bullets"] = [slide_data.get("caption") or "（コードの参照に失敗しました）"]
+                continue
+            path = render_code_image(block.code, block.language, media_dir / f"code_{i + 1}.png")
+            slide_data["code_image_path"] = str(path)
+
+        elif layout == "diagram":
+            ref = slide_data.get("diagram_ref")
+            block = diagrams[ref] if isinstance(ref, int) and 0 <= ref < len(diagrams) else None
+            if block is None:
+                print(f"  [警告] スライド{i + 1}のdiagram_ref={ref}が見つかりません。bulletsにフォールバックします。")
+                slide_data["layout"] = "bullets"
+                slide_data["bullets"] = [slide_data.get("caption") or "（図の参照に失敗しました）"]
+                continue
+            path = render_mermaid_diagram(block.mermaid_source, str(media_dir / f"diagram_{i + 1}.png"))
+            if path is None:
+                # mermaid.inkへの接続失敗など。bulletsにフォールバックする
+                slide_data["layout"] = "bullets"
+                slide_data["bullets"] = [slide_data.get("caption") or "（図のレンダリングに失敗しました）"]
+                continue
+            slide_data["diagram_image_path"] = str(path)
+
+    return slides
+
+
 def run_pipeline(
     article_path: str,
     output_dir: str = "output",
@@ -124,11 +169,16 @@ def run_pipeline(
         video_title = extract_h1_title(article_text) or DEFAULT_VIDEO_TITLE
         print(f"タイトル未指定のため記事の見出し1から自動設定: 「{video_title}」")
 
+    codes, diagrams = extract_article_assets(article_text)
+    asset_summary = summarize_for_prompt(codes, diagrams)
+    if codes or diagrams:
+        print(f"記事からコードブロック{len(codes)}個・mermaid図{len(diagrams)}個を抽出しました")
+
     print("=== 台本エージェント ===")
     script, script_score, _ = script_agent.run(article_text)
 
     print("=== スライドエージェント ===")
-    slides, slides_score, _ = slides_agent.run(article_text, script)
+    slides, slides_score, _ = slides_agent.run(article_text, script, asset_summary)
 
     print("=== VOICEVOXテキストエージェント ===")
     voicevox_text, voicevox_score, _ = voicevox_agent.run(script)
@@ -142,6 +192,10 @@ def run_pipeline(
     description, description_score, _ = description_agent.run(script, article_url)
 
     output_dir_path = Path(output_dir) / datetime.now().strftime("%Y%m%d_%H%M%S")
+
+    if codes or diagrams:
+        print("=== 記事中のコード・図をスライドに反映 ===")
+        slides = _resolve_media_slides(slides, codes, diagrams, output_dir_path / "media")
 
     if generate_images:
         print("=== スライド背景の生成（Gemini） ===")
