@@ -13,7 +13,8 @@ import os
 # - EXTRACT:  VOICEVOX用テキスト抽出など、フォーマットに沿って機械的に整形するだけの作業
 MODEL_GENERATE = os.environ.get("CLAUDE_MODEL_GENERATE", "claude-sonnet-5")
 MODEL_EVALUATE = os.environ.get("CLAUDE_MODEL_EVALUATE", "claude-sonnet-5")
-MODEL_EXTRACT = os.environ.get("CLAUDE_MODEL_EXTRACT", "claude-haiku-4-5-20251001")
+MODEL_EXTRACT = os.environ.get(
+    "CLAUDE_MODEL_EXTRACT", "claude-haiku-4-5-20251001")
 
 # 生成→評価→修正ループの最大試行回数（ai-dev-agent構想と同じく上限3回）
 MAX_REVISION_LOOPS = 3

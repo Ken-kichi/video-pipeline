@@ -13,7 +13,6 @@ dependencies = [
     "python-dotenv>=1.2.2",
     "questionary>=2.1.1",
     "requests>=2.34.2",
-    "ruff>=0.16.1",
 ]
 
 [project.scripts]
