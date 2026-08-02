@@ -264,17 +264,34 @@ video_pipeline/
 
 ## 調整できるパラメータ（`config.py`）
 
-役割ごとにモデルを分けている（評価・整合性チェックは品質のゲート役なので最も強いモデルを、
-VOICEVOXテキスト抽出のような機械的な作業は軽量モデルを割り当てる方針）。
+役割ごとにモデルを分けている。評価・整合性チェックは元々「品質のゲート役」として
+最も強いモデル(Opus)を割り当てていたが、5エージェント×最大3ループ分のコストが
+嵩む（Opusは2026年8月時点でSonnet 5の紹介価格の2.5倍）ため、コスト優先で
+デフォルトをSonnetに変更した。評価の質を優先したい場合は
+`CLAUDE_MODEL_EVALUATE=claude-opus-4-8` を設定すれば元に戻せる。
 
 - `MODEL_GENERATE`（環境変数 `CLAUDE_MODEL_GENERATE`）: 台本・スライドの生成/修正。デフォルト `claude-sonnet-5`
-- `MODEL_EVALUATE`（環境変数 `CLAUDE_MODEL_EVALUATE`）: 評価・整合性チェック。デフォルト `claude-opus-4-8`
+- `MODEL_EVALUATE`（環境変数 `CLAUDE_MODEL_EVALUATE`）: 評価・整合性チェック。デフォルト `claude-sonnet-5`
+  （品質を優先するなら `claude-opus-4-8` に変更。コストは約2.5倍になる）
 - `MODEL_EXTRACT`（環境変数 `CLAUDE_MODEL_EXTRACT`）: VOICEVOXテキストの機械的な抽出。デフォルト `claude-haiku-4-5-20251001`
-- `MAX_REVISION_LOOPS`: 各エージェント（総合エージェントを含む）の生成→評価→修正ループの最大回数（デフォルト3）
+- `MAX_REVISION_LOOPS`: 各エージェント（総合エージェントを含む）の生成→評価→修正ループの最大回数（デフォルト3。
+  減らすとコストも下がるが、品質基準に届く前にループが打ち切られやすくなる）
 - `SCORE_THRESHOLD`: この点数(0-100)以上で合格とみなす。総合エージェントの整合性スコアにも適用される（デフォルト90）
 - `GENERATE_SLIDE_IMAGES`（環境変数）: スライド背景生成を有効にするか（デフォルトはオフ）
 - `GEMINI_IMAGE_MODEL`（環境変数）: 背景生成に使うGeminiモデル。デフォルト `gemini-3.1-flash-image-preview`
   （Nano Banana 2。より高品質・高価な `gemini-3-pro-image-preview` に変更も可能）
+
+### コストを抑えるためのヒント
+
+- `render-video`・`voicevox-synthesize`・`prepare-characters`はAnthropic APIを
+  呼ばない（VOICEVOX ENGINEとffmpeg/psd-toolsのみ使用）。動画の組み立てや
+  立ち絵まわりだけを試したい時は、既存の`output/<実行時刻>/`に対してこれらの
+  コマンドだけを再実行すれば追加のAPI費用はかからない。`video-pipeline`の
+  再実行が必要なのは、記事の内容そのもの（台本・スライド内容）を作り直したい
+  時だけ
+- `--generate-images`（Gemini背景生成）はAnthropicとは別のGEMINI_API_KEYの
+  課金になる。動画1本あたりスライド枚数分（10〜16回程度）呼び出すので、
+  見た目より費用を優先するなら未使用でよい
 
 ## スライド背景生成について
 
