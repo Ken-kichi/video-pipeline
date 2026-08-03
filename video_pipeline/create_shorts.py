@@ -4,10 +4,12 @@
 上下の空いたスペースに文言を入れる、という作業を手動で行っていた。
 このコマンドはそれを自動化する。script_agentが台本の0:00〜1:00を
 「単体でショートとして成立する概要パート」として生成する設計になっている
-ため、デフォルトでは冒頭60秒を切り出す(--durationで変更可)。
+ため、デフォルトでは冒頭60秒を切り出す(--durationで変更可。指定秒数
+ぴったりで切るとセリフの途中で途切れるため、実際には指定秒数付近の
+自然な切れ目に合わせて調整される)。
 
-呼び出すエージェントはthumbnail_agentのみ(単発のClaude API呼び出し1回。
-サムネイルと同じキャッチコピーを使うことで見た目の一貫性を持たせる)。
+呼び出すエージェントはshorts_agentのみ(単発のClaude API呼び出し1回。
+サムネイル用とは別に、ショートに適したより強いフック文言を考える)。
 
 使い方:
   uv run create-shorts --video output/20260731_153000/final_video.mp4
@@ -19,7 +21,7 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-from video_pipeline.agents import thumbnail_agent
+from video_pipeline.agents import shorts_agent
 from video_pipeline.interactive import pick_output_run
 from video_pipeline.shorts_generator import (
     DEFAULT_SHORTS_DURATION_SECONDS,
@@ -41,7 +43,7 @@ def main() -> None:
     parser.add_argument(
         "--script",
         default=None,
-        help="キャッチコピー生成に使うscript.mdのパス(省略時は動画と同じディレクトリのもの)",
+        help="フック文言生成に使うscript.mdのパス(省略時は動画と同じディレクトリのもの)",
     )
     parser.add_argument(
         "--output",
@@ -52,8 +54,9 @@ def main() -> None:
         "--duration",
         type=float,
         default=DEFAULT_SHORTS_DURATION_SECONDS,
-        help=f"冒頭から切り出す秒数(デフォルト{DEFAULT_SHORTS_DURATION_SECONDS}秒。"
-        "台本の概要パート(0:00〜1:00)の実際の長さに合わせて調整してよい)",
+        help=f"冒頭から切り出す目安秒数(デフォルト{DEFAULT_SHORTS_DURATION_SECONDS}秒。"
+        "台本の概要パート(0:00〜1:00)の実際の長さに合わせて調整してよい。"
+        "実際の切り出し秒数はこの付近の自然な切れ目に調整される)",
     )
     args = parser.parse_args()
 
@@ -80,19 +83,19 @@ def main() -> None:
 
     output_path = Path(args.output) if args.output else video_path.parent / "shorts.mp4"
 
-    print("=== ショート用キャッチコピーを生成中 ===")
+    print("=== ショート用フック文言を生成中 ===")
     script_text = script_path.read_text(encoding="utf-8")
-    thumbnail_copy = thumbnail_agent.generate(script_text)
-    print(f"  main_text: {thumbnail_copy['main_text']}")
-    print(f"  sub_text : {thumbnail_copy['sub_text']}")
+    shorts_copy = shorts_agent.generate(script_text)
+    print(f"  hook_text  : {shorts_copy['hook_text']}")
+    print(f"  follow_text: {shorts_copy['follow_text']}")
 
-    print(f"=== ショート動画を組み立て中(冒頭{args.duration}秒) ===")
+    print(f"=== ショート動画を組み立て中(冒頭{args.duration}秒付近) ===")
     try:
         result_path = build_shorts_video(
             source_video_path=video_path,
             output_path=output_path,
-            main_text=thumbnail_copy["main_text"],
-            sub_text=thumbnail_copy["sub_text"],
+            main_text=shorts_copy["hook_text"],
+            sub_text=shorts_copy["follow_text"],
             duration=args.duration,
         )
     except Exception as exc:  # noqa: BLE001 CLIとして分かりやすいエラー表示にするため
