@@ -4,9 +4,15 @@
 上下の空いたスペースに文言を入れる、という作業を手動で行っていた。
 このコマンドはそれを自動化する。script_agentが台本の0:00〜1:00を
 「単体でショートとして成立する概要パート」として生成する設計になっている
-ため、デフォルトでは冒頭60秒を切り出す(--durationで変更可。指定秒数
-ぴったりで切るとセリフの途中で途切れるため、実際には指定秒数付近の
-自然な切れ目に合わせて調整される)。
+ため、デフォルトでは「シーン1の終わりまで」を切り出す(--sceneで対象の
+シーン番号を変更可)。
+
+`render-video`が書き出す`scene_boundaries.json`（同じディレクトリにある想定）
+から、指定シーンの正確な終了時刻を読んで切り出す。見つからない場合
+（古いバージョンで生成した動画など）は、--durationの目安秒数付近の
+自然な切れ目(無音区間)を探すフォールバックになるが、BGMを使っていると
+セリフ間の無音がかき消されて検出できないことがあるため、
+scene_boundaries.jsonがある場合は必ずそちらが優先される。
 
 呼び出すエージェントはshorts_agentのみ(単発のClaude API呼び出し1回。
 サムネイル用とは別に、ショートに適したより強いフック文言を考える)。
@@ -26,6 +32,7 @@ from video_pipeline.interactive import pick_output_run
 from video_pipeline.shorts_generator import (
     DEFAULT_SHORTS_DURATION_SECONDS,
     build_shorts_video,
+    read_scene_end_time,
 )
 
 
@@ -51,12 +58,18 @@ def main() -> None:
         help="出力するショート動画のパス(省略時は動画と同じディレクトリのshorts.mp4)",
     )
     parser.add_argument(
+        "--scene",
+        type=int,
+        default=1,
+        help="このシーン番号の終わりまでを切り出す(デフォルト1=概要パート)。"
+        "scene_boundaries.jsonが無い場合は使われない",
+    )
+    parser.add_argument(
         "--duration",
         type=float,
         default=DEFAULT_SHORTS_DURATION_SECONDS,
-        help=f"冒頭から切り出す目安秒数(デフォルト{DEFAULT_SHORTS_DURATION_SECONDS}秒。"
-        "台本の概要パート(0:00〜1:00)の実際の長さに合わせて調整してよい。"
-        "実際の切り出し秒数はこの付近の自然な切れ目に調整される)",
+        help=f"scene_boundaries.jsonが見つからない場合のフォールバック用の目安秒数"
+        f"(デフォルト{DEFAULT_SHORTS_DURATION_SECONDS}秒。この付近の自然な切れ目に調整される)",
     )
     args = parser.parse_args()
 
@@ -83,13 +96,23 @@ def main() -> None:
 
     output_path = Path(args.output) if args.output else video_path.parent / "shorts.mp4"
 
+    scene_boundaries_path = video_path.parent / "scene_boundaries.json"
+    exact_end_time = read_scene_end_time(scene_boundaries_path, args.scene)
+    if exact_end_time is None:
+        print(
+            f"  [警告] {scene_boundaries_path} が見つからないか、"
+            f"シーン{args.scene}の情報がありません。"
+            f"目安{args.duration}秒付近の自然な切れ目で代用します"
+            "(render-videoを最新版で再実行するとscene_boundaries.jsonが作られます)"
+        )
+
     print("=== ショート用フック文言を生成中 ===")
     script_text = script_path.read_text(encoding="utf-8")
     shorts_copy = shorts_agent.generate(script_text)
     print(f"  hook_text  : {shorts_copy['hook_text']}")
     print(f"  follow_text: {shorts_copy['follow_text']}")
 
-    print(f"=== ショート動画を組み立て中(冒頭{args.duration}秒付近) ===")
+    print("=== ショート動画を組み立て中 ===")
     try:
         result_path = build_shorts_video(
             source_video_path=video_path,
@@ -97,6 +120,7 @@ def main() -> None:
             main_text=shorts_copy["hook_text"],
             sub_text=shorts_copy["follow_text"],
             duration=args.duration,
+            exact_end_time=exact_end_time,
         )
     except Exception as exc:  # noqa: BLE001 CLIとして分かりやすいエラー表示にするため
         print(

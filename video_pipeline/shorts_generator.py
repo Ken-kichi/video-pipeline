@@ -13,6 +13,7 @@
   3. 上下の余白に、shorts_agentが生成するフック文言を大きく焼き込む
 """
 
+import json
 import re
 import subprocess
 from pathlib import Path
@@ -91,6 +92,27 @@ def _build_text_bar(
     return img
 
 
+def read_scene_end_time(
+    scene_boundaries_path: str | Path, scene_number: int
+) -> float | None:
+    """render-videoが書き出したscene_boundaries.jsonから、指定シーンの終了時刻を読む。
+
+    見つかれば正確な秒数、見つからなければNoneを返す(呼び出し側は
+    Noneの場合、目安の秒数+無音検出にフォールバックする)。
+    """
+    scene_boundaries_path = Path(scene_boundaries_path)
+    if not scene_boundaries_path.exists():
+        return None
+    try:
+        data = json.loads(scene_boundaries_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return None
+    for entry in data:
+        if entry.get("scene_number") == scene_number:
+            return float(entry["end"])
+    return None
+
+
 def _run_ffmpeg(args: list[str]) -> subprocess.CompletedProcess:
     result = subprocess.run(["ffmpeg", "-y", *args], capture_output=True, text=True)
     if result.returncode != 0:
@@ -152,13 +174,21 @@ def build_shorts_video(
     main_text: str,
     sub_text: str,
     duration: float = DEFAULT_SHORTS_DURATION_SECONDS,
+    exact_end_time: float | None = None,
     work_dir: str | Path | None = None,
 ) -> Path:
     """完成動画の冒頭を切り出し、9:16のショート動画として書き出す。
 
-    上段にmain_text、下段にsub_textを表示する。指定秒数ぴったりで切ると
-    セリフの途中で途切れるため、指定秒数付近の無音区間に合わせて実際の
-    切り出し秒数を調整し、さらに末尾に短い音声フェードアウトをかける。
+    上段にmain_text、下段にsub_textを表示する。
+
+    exact_end_timeが指定されていれば、それを切り出し秒数としてそのまま使う
+    (render-videoが書き出したscene_boundaries.jsonから読んだ、シーンの
+    正確な終了時刻を渡す想定)。指定が無い場合はdurationを目安として、
+    その付近の無音区間(セリフの間)を探して調整する
+    (BGMを使っている場合、セリフ間の無音がBGMの音でかき消されて検出できず、
+    結局目安の秒数ぴったりで切れてしまうことがある。scene_boundaries.jsonが
+    使える場合は必ずそちらを優先すること)。
+    いずれの場合も、末尾には短い音声フェードアウトをかける。
     """
     source_video_path = Path(source_video_path)
     output_path = Path(output_path)
@@ -167,12 +197,16 @@ def build_shorts_video(
     work_dir = Path(work_dir) if work_dir else output_path.parent / "_shorts_work"
     work_dir.mkdir(parents=True, exist_ok=True)
 
-    actual_duration = _find_natural_cutoff(source_video_path, duration)
-    if abs(actual_duration - duration) > 0.05:
-        print(
-            f"  指定秒数({duration:.1f}秒)付近の自然な切れ目"
-            f"({actual_duration:.2f}秒)に合わせて調整しました"
-        )
+    if exact_end_time is not None:
+        actual_duration = exact_end_time
+        print(f"  シーン境界に基づき、正確に{actual_duration:.2f}秒で切り出します")
+    else:
+        actual_duration = _find_natural_cutoff(source_video_path, duration)
+        if abs(actual_duration - duration) > 0.05:
+            print(
+                f"  指定秒数({duration:.1f}秒)付近の自然な切れ目"
+                f"({actual_duration:.2f}秒)に合わせて調整しました"
+            )
 
     top_bar = _build_text_bar(
         main_text, SHORTS_WIDTH, BAR_HEIGHT, TOP_FONT_SIZE, TEXT_COLOR

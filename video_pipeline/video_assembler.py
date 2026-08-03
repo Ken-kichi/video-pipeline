@@ -398,6 +398,56 @@ def _load_slides_manifest(slides_dir: Path) -> list[dict]:
     return json.loads(manifest_path.read_text(encoding="utf-8"))
 
 
+def _compute_scene_boundaries(
+    timeline: list[TimedLine],
+) -> dict[int, tuple[float, float]]:
+    """シーン番号ごとの(開始時刻, 終了時刻)を計算する。
+
+    シーンの終了時刻は「次のシーン最初のセリフの開始時刻」（最後のシーンは
+    タイムライン全体の終了時刻）とする。単純に各セリフのend-startを足すだけ
+    だと、セリフ間に挿入した無音の"間"が終了時刻に反映されないため、
+    render-video(スライド表示時間)・create-shorts(切り出し位置)の両方が
+    この関数を共通で使う。
+    """
+    scene_start: dict[int, float] = {}
+    for item in timeline:
+        if item.scene_number not in scene_start:
+            scene_start[item.scene_number] = item.start
+
+    ordered_scenes = sorted(scene_start, key=lambda sn: scene_start[sn])
+    final_end = timeline[-1].end if timeline else TITLE_SLIDE_DURATION_SECONDS
+
+    boundaries: dict[int, tuple[float, float]] = {}
+    for i, scene_number in enumerate(ordered_scenes):
+        start = scene_start[scene_number]
+        end = (
+            scene_start[ordered_scenes[i + 1]]
+            if i + 1 < len(ordered_scenes)
+            else final_end
+        )
+        boundaries[scene_number] = (start, end)
+    return boundaries
+
+
+def _write_scene_boundaries(timeline: list[TimedLine], output_path: Path) -> Path:
+    """シーンごとの開始・終了時刻をJSONに保存する。
+
+    create-shortsが「シーン1の終わりまで」のような正確な切り出し位置を
+    再利用できるようにするため(以前は目安の秒数+無音検出で切り出し位置を
+    推測していたが、BGMが流れているとセリフ間の無音が検出できず、
+    結局中途半端な位置で切れてしまう不具合があった)。
+    """
+    boundaries = _compute_scene_boundaries(timeline)
+    data = [
+        {"scene_number": scene_number, "start": round(start, 3), "end": round(end, 3)}
+        for scene_number, (start, end) in sorted(boundaries.items())
+    ]
+    output_path.write_text(
+        json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+    return output_path
+
+
 def _build_visual_timeline(
     timeline: list[TimedLine], slides_dir: Path, thumbnail_path: Path | None = None
 ) -> list[tuple[Path, float]]:
@@ -422,23 +472,9 @@ def _build_visual_timeline(
             continue
         scene_to_files.setdefault(scene_number, []).append(entry["file"])
 
-    scene_start: dict[int, float] = {}
-    for item in timeline:
-        if item.scene_number not in scene_start:
-            scene_start[item.scene_number] = item.start
-
-    ordered_scenes = sorted(scene_start, key=lambda sn: scene_start[sn])
-    final_end = timeline[-1].end if timeline else TITLE_SLIDE_DURATION_SECONDS
-
-    scene_duration: dict[int, float] = {}
-    for i, scene_number in enumerate(ordered_scenes):
-        start = scene_start[scene_number]
-        end = (
-            scene_start[ordered_scenes[i + 1]]
-            if i + 1 < len(ordered_scenes)
-            else final_end
-        )
-        scene_duration[scene_number] = end - start
+    boundaries = _compute_scene_boundaries(timeline)
+    ordered_scenes = sorted(boundaries)
+    scene_duration = {sn: end - start for sn, (start, end) in boundaries.items()}
 
     visual_timeline: list[tuple[Path, float]] = []
     if thumbnail_path and Path(thumbnail_path).exists():
@@ -574,6 +610,11 @@ def assemble_video(
     visual_timeline = _build_visual_timeline(
         timeline, slides_dir, resolved_thumbnail_path
     )
+
+    scene_boundaries_path = _write_scene_boundaries(
+        timeline, output_path.parent / "scene_boundaries.json"
+    )
+    print(f"  シーン境界を保存しました: {scene_boundaries_path}")
 
     print("=== 音声を結合中 ===")
     audio_concat_path = _write_audio_concat_file(

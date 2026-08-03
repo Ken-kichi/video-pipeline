@@ -69,8 +69,9 @@ flowchart TD
     Out --> VS["<b>uv run voicevox-synthesize</b><br/>VOICEVOX ENGINEのみ"]
     VS --> Wav["audio/*.wav<br/>(DaVinci Resolveで手動編集する場合)"]
 
-    Final --> CS["<b>uv run create-shorts</b><br/>冒頭60秒を9:16に切り出し"]
-    Script["script.md"] -.キャッチコピー生成.-> CS
+    Final --> CS["<b>uv run create-shorts</b><br/>シーン1の終わりまでを9:16に切り出し"]
+    Script["script.md"] -.フック文言生成.-> CS
+    Bounds["scene_boundaries.json<br/>(シーンごとの正確な開始/終了時刻)"] -.正確な切り出し位置.-> CS
     CS --> Shorts["shorts.mp4"]
 ```
 
@@ -357,6 +358,7 @@ code/diagramスライド側にも字幕・キャラクター表示分の下部�
 | `output/<実行時刻>/shorts.mp4` | （`create-shorts`実行後）YouTubeショート動画（9:16, 1080x1920） |
 | `output/<実行時刻>/audio/` | （`voicevox-synthesize`実行後）セリフごとのWAV音声+manifest.json |
 | `output/<実行時刻>/final_video.mp4` | （`render-video`実行後）色分け字幕つき（立ち絵素材があれば口の開閉つき）の完成動画 |
+| `output/<実行時刻>/scene_boundaries.json` | （`render-video`実行後）シーンごとの正確な開始/終了時刻。`create-shorts`が切り出し位置に使う |
 
 ## 構成
 
@@ -542,13 +544,17 @@ uv run create-shorts
 `output/<実行時刻>/shorts.mp4`（9:16, 1080x1920）に保存される
 （`--output`で変更可）。
 
-- `--duration`（デフォルト60秒）付近を目安に切り出す。`script_agent`は台本の
-  0:00〜1:00を「単体でショートとして成立する概要パート」として生成する
-  設計になっているため、これに合わせたデフォルト値にしている。**指定秒数
-  ぴったりで切るとセリフの途中で途切れてしまう不具合が実際に発生したため**、
-  指定秒数付近の無音区間(セリフとセリフの間)をffmpegの`silencedetect`で探し、
-  そこに合わせて実際の切り出し秒数を調整する（見つからない場合でも、末尾に
-  短い音声フェードアウトを必ずかけて急な切れ方を緩和する）
+- デフォルトでは`--scene 1`（シーン1=概要パートの終わりまで）を切り出す。
+  `render-video`実行時に書き出される`scene_boundaries.json`
+  （同じディレクトリにある想定）から、指定シーンの正確な終了時刻を読んで
+  切り出す。**当初は「目安の秒数(60秒)付近の無音区間をffmpegの
+  `silencedetect`で探す」方式にしていたが、BGMを使っているとセリフ間の
+  無音がBGMの音でかき消されて検出できず、結局目安秒数ぴったりで切れて
+  セリフの途中で途切れてしまう不具合が実際に発生した**。台本のシーン構造
+  そのものから正確な境界を取得する方式に変更して解消した
+  （`scene_boundaries.json`が無い場合、古いバージョンで生成した動画などは
+  `--duration`の目安秒数+無音検出にフォールバックする。末尾には短い音声
+  フェードアウトを必ずかける）
 - 元の16:9映像を縦長キャンバスの中央（1080x608、上下に656pxずつの帯）に配置し、
   上段に`hook_text`、下段に`follow_text`を大きく焼き込む。文言は
   `shorts_agent`が専用に生成する（**サムネイル用のキャッチコピーをそのまま
