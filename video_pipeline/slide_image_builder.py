@@ -27,13 +27,43 @@ import json
 
 from PIL import Image, ImageDraw, ImageFont
 
-FONT_PATH = Path(__file__).parent / "assets" / \
-    "fonts" / "NotoSansJP-Variable.ttf"
+FONT_PATH = Path(__file__).parent / "assets" / "fonts" / "NotoSansJP-Variable.ttf"
+CHARACTER_ASSETS_DIR = Path(__file__).parent / "assets" / "characters"
 
 SLIDE_WIDTH = 1920
 SLIDE_HEIGHT = 1080
 MARGIN = 100
+# code/diagramスライドの画像が、画面下部の字幕・キャラクター立ち絵オーバーレイ
+# と重ならないよう確保する下部の余白(px)。
+# - SUBTITLE_RESERVED_SPACE: 字幕は常に表示されるので無条件に確保する
+#   (2行分の字幕+マージンを想定。以前はこの分の余白を確保していなかったため、
+#   キャラクターが無い環境でもcode/diagramスライドが字幕と重なる余地があった)
+# - CHARACTER_RESERVED_SPACE: 立ち絵素材(video_assembler.CHARACTER_VIDEO_HEIGHT
+#   =300px)がある場合に必要な余白。字幕と同じく画面下部に重なる領域なので、
+#   両者を足し算せず大きい方を採用する(_media_bottom_reserved_space参照)
+SUBTITLE_RESERVED_SPACE = 260
+CHARACTER_RESERVED_SPACE = 340
 LINE_SPACING = 1.4
+
+
+def _media_bottom_reserved_space() -> int:
+    """字幕・キャラクター立ち絵と重ならないために確保すべき下部余白を返す。
+
+    どちらも画面下部に配置される(縦に積み上がるわけではない)ため、
+    必要な余白は大きい方の値を採用する。キャラクター素材の有無は
+    render-video側のオーバーレイ有無と一致させるため、ここでも
+    assets/characters/を見て判定する(以前は素材が無くても常に
+    CHARACTER_RESERVED_SPACE分を確保しており、使っていない人まで
+    表示領域が不必要に狭くなっていた)。
+    """
+    reserved = SUBTITLE_RESERVED_SPACE
+    has_character_assets = CHARACTER_ASSETS_DIR.exists() and any(
+        CHARACTER_ASSETS_DIR.glob("*_open.png")
+    )
+    if has_character_assets:
+        reserved = max(reserved, CHARACTER_RESERVED_SPACE)
+    return reserved
+
 
 BG_COLOR = "#FFFFFF"
 QUOTE_BG_COLOR = "#EEF1FD"
@@ -146,8 +176,7 @@ def _make_base_canvas(slide_data: dict, fallback_color: str) -> Image.Image:
         overlay_draw = ImageDraw.Draw(overlay)
         alpha = int(255 * SCRIM_OPACITY)
         overlay_draw.rectangle([(0, 0), bg.size], fill=(255, 255, 255, alpha))
-        combined = Image.alpha_composite(
-            bg.convert("RGBA"), overlay).convert("RGB")
+        combined = Image.alpha_composite(bg.convert("RGBA"), overlay).convert("RGB")
         return combined
 
     return Image.new("RGB", (SLIDE_WIDTH, SLIDE_HEIGHT), fallback_color)
@@ -181,8 +210,7 @@ def build_title_slide(
     subtitle_font = _load_font(36, weight=400)
 
     title_lines = _wrap_text(draw, title, title_font, SLIDE_WIDTH - MARGIN * 2)
-    subtitle_lines = _wrap_text(
-        draw, subtitle, subtitle_font, SLIDE_WIDTH - MARGIN * 2)
+    subtitle_lines = _wrap_text(draw, subtitle, subtitle_font, SLIDE_WIDTH - MARGIN * 2)
 
     total_height = (
         _block_height(title_lines, title_font)
@@ -216,13 +244,11 @@ def _render_bullets(
     y = _draw_lines(draw, title_lines, title_font, MARGIN, y, TITLE_COLOR)
 
     y += 20
-    draw.line([(MARGIN, y), (MARGIN + body_max_width, y)],
-              fill=ACCENT_COLOR, width=4)
+    draw.line([(MARGIN, y), (MARGIN + body_max_width, y)], fill=ACCENT_COLOR, width=4)
     y += 50
 
     for bullet in slide_data.get("bullets", []):
-        bullet_lines = _wrap_text(
-            draw, f"・{bullet}", body_font, body_max_width)
+        bullet_lines = _wrap_text(draw, f"・{bullet}", body_font, body_max_width)
         y = _draw_lines(draw, bullet_lines, body_font, MARGIN, y, BODY_COLOR)
         y += 16
 
@@ -236,8 +262,7 @@ def _render_stat(img: Image.Image, draw: ImageDraw.ImageDraw, slide_data: dict) 
 
     if title:
         title_font = _load_font(40, weight=700)
-        title_lines = _wrap_text(
-            draw, title, title_font, SLIDE_WIDTH - MARGIN * 2)
+        title_lines = _wrap_text(draw, title, title_font, SLIDE_WIDTH - MARGIN * 2)
         _draw_lines_centered(
             draw, title_lines, title_font, SLIDE_WIDTH // 2, 110, SUBTITLE_COLOR
         )
@@ -247,21 +272,17 @@ def _render_stat(img: Image.Image, draw: ImageDraw.ImageDraw, slide_data: dict) 
     band_top = SLIDE_HEIGHT // 2 - 160
     band_bottom = SLIDE_HEIGHT // 2 + 160
     if not has_background:
-        draw.rectangle(
-            [(0, band_top), (SLIDE_WIDTH, band_bottom)], fill=QUOTE_BG_COLOR)
+        draw.rectangle([(0, band_top), (SLIDE_WIDTH, band_bottom)], fill=QUOTE_BG_COLOR)
 
     stat_font = _load_font(140, weight=700)
-    stat_lines = _wrap_text(draw, stat_value, stat_font,
-                            SLIDE_WIDTH - MARGIN * 2)
+    stat_lines = _wrap_text(draw, stat_value, stat_font, SLIDE_WIDTH - MARGIN * 2)
     stat_height = _block_height(stat_lines, stat_font)
     y = (band_top + band_bottom) // 2 - stat_height // 2
-    _draw_lines_centered(draw, stat_lines, stat_font,
-                         SLIDE_WIDTH // 2, y, ACCENT_COLOR)
+    _draw_lines_centered(draw, stat_lines, stat_font, SLIDE_WIDTH // 2, y, ACCENT_COLOR)
 
     if stat_label:
         label_font = _load_font(34, weight=400)
-        label_lines = _wrap_text(
-            draw, stat_label, label_font, SLIDE_WIDTH - MARGIN * 2)
+        label_lines = _wrap_text(draw, stat_label, label_font, SLIDE_WIDTH - MARGIN * 2)
         _draw_lines_centered(
             draw,
             label_lines,
@@ -281,12 +302,10 @@ def _render_quote(
 
     # 装飾用の大きな引用符
     mark_font = _load_font(220, weight=700)
-    draw.text((MARGIN - 20, 60), "\u201c",
-              font=mark_font, fill=ACCENT_COLOR_SOFT)
+    draw.text((MARGIN - 20, 60), "\u201c", font=mark_font, fill=ACCENT_COLOR_SOFT)
 
     quote_font = _load_font(88, weight=700)
-    quote_lines = _wrap_text(
-        draw, quote_text, quote_font, SLIDE_WIDTH - MARGIN * 2)
+    quote_lines = _wrap_text(draw, quote_text, quote_font, SLIDE_WIDTH - MARGIN * 2)
     context_font = _load_font(32, weight=400)
     context_lines = (
         _wrap_text(draw, quote_context, context_font, SLIDE_WIDTH - MARGIN * 2)
@@ -354,8 +373,7 @@ def _render_comparison(
         y = _draw_lines(draw, label_lines, label_font, x, y, ACCENT_COLOR)
         y += 20
         for bullet in slide_data.get(bullets_key, []):
-            bullet_lines = _wrap_text(
-                draw, f"・{bullet}", body_font, column_width)
+            bullet_lines = _wrap_text(draw, f"・{bullet}", body_font, column_width)
             y = _draw_lines(draw, bullet_lines, body_font, x, y, BODY_COLOR)
             y += 14
 
@@ -363,7 +381,13 @@ def _render_comparison(
 def _render_media_layout(
     img: Image.Image, draw: ImageDraw.ImageDraw, slide_data: dict, image_path_key: str
 ) -> None:
-    """code/diagram共通: タイトル+画像(コード/mermaid図)+captionを描画する。"""
+    """code/diagram共通: タイトル+画像(コード/mermaid図)+captionを描画する。
+
+    画面下部は、キャラクター立ち絵オーバーレイ(video_assembler側で合成)が
+    使う領域として一定の余白(MEDIA_BOTTOM_RESERVED_SPACE)を確保しておく。
+    確保しないと、内容が長いコード/図がキャラクターと重なってしまう
+    不具合が実際に発生した。
+    """
     title_font = _load_font(48, weight=700)
     caption_font = _load_font(30, weight=400)
 
@@ -373,8 +397,7 @@ def _render_media_layout(
     y = 70
     y = _draw_lines(draw, title_lines, title_font, MARGIN, y, TITLE_COLOR)
     y += 20
-    draw.line([(MARGIN, y), (SLIDE_WIDTH - MARGIN, y)],
-              fill=ACCENT_COLOR, width=4)
+    draw.line([(MARGIN, y), (SLIDE_WIDTH - MARGIN, y)], fill=ACCENT_COLOR, width=4)
     y += 40
 
     caption = slide_data.get("caption", "")
@@ -386,7 +409,7 @@ def _render_media_layout(
     image_path = slide_data.get(image_path_key)
     if image_path and Path(image_path).exists():
         max_w = SLIDE_WIDTH - MARGIN * 2
-        max_h = SLIDE_HEIGHT - y - 60 - caption_height
+        max_h = SLIDE_HEIGHT - y - _media_bottom_reserved_space() - caption_height
         media = _fit_image(image_path, max_w, max_h)
         media_x = (SLIDE_WIDTH - media.width) // 2
         media_y = y + max(0, (max_h - media.height) // 2)
@@ -492,17 +515,15 @@ def build_slide_images(
 
     title_path = build_title_slide(
         title,
-        "",
+        "VOICEVOX解説動画 スライド",
         output_dir / "slide_00_title.png",
         background_path=title_background_path,
     )
     paths = [title_path]
-    manifest = [{"file": title_path.name,
-                 "scene_number": None, "layout": "title"}]
+    manifest = [{"file": title_path.name, "scene_number": None, "layout": "title"}]
 
     for i, slide_data in enumerate(slides, start=1):
-        path = build_content_slide(
-            slide_data, i, output_dir / f"slide_{i:02d}.png")
+        path = build_content_slide(slide_data, i, output_dir / f"slide_{i:02d}.png")
         paths.append(path)
         manifest.append(
             {

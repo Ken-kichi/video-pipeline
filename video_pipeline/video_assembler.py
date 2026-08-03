@@ -67,6 +67,11 @@ DEFAULT_STYLE_COLOR = "&H00FFFFFF"  # 白(未知の話者向けフォールバ�
 CHARACTER_PREFIXES = {"つむぎ": "tsumugi", "ずんだもん": "zundamon"}
 CHARACTER_POSITIONS = {"つむぎ": "left", "ずんだもん": "right"}
 CHARACTER_MARGIN_X = 40
+# 動画本編でのキャラクター表示の高さ(px)。prepare_charactersが書き出す
+# PNG(デフォルト480px)をこの高さに縮小してオーバーレイする。字幕や
+# code/diagramスライドの表示領域と被らないよう、やや小さめにしている
+# (実際にキャラクターが字幕・スライド内容と重なる不具合が起きたため)。
+CHARACTER_VIDEO_HEIGHT = 300
 
 VIDEO_WIDTH = 1920
 VIDEO_HEIGHT = 1080
@@ -655,16 +660,25 @@ def assemble_video(
         open_idx = input_index
         input_index += 1
 
+        closed_scaled_label = f"charc{closed_idx}"
+        open_scaled_label = f"charo{open_idx}"
+        filter_stages.append(
+            f"[{closed_idx}:v]scale=-2:{CHARACTER_VIDEO_HEIGHT}[{closed_scaled_label}]"
+        )
+        filter_stages.append(
+            f"[{open_idx}:v]scale=-2:{CHARACTER_VIDEO_HEIGHT}[{open_scaled_label}]"
+        )
+
         bg_closed_label = f"bg{input_index}c"
         bg_open_label = f"bg{input_index}o"
         # まず口を閉じた状態を常時オーバーレイ(=待機中のデフォルト表示)、
         # その上に口を開いた状態を、そのキャラクターが喋っている区間だけ重ねる
         filter_stages.append(
-            f"[{current_label}][{closed_idx}:v]overlay=x={x_expr}:y={y_expr}:"
+            f"[{current_label}][{closed_scaled_label}]overlay=x={x_expr}:y={y_expr}:"
             f"enable='{closed_enable_expr}'[{bg_closed_label}]"
         )
         filter_stages.append(
-            f"[{bg_closed_label}][{open_idx}:v]overlay=x={x_expr}:y={y_expr}:"
+            f"[{bg_closed_label}][{open_scaled_label}]overlay=x={x_expr}:y={y_expr}:"
             f"enable='{enable_expr}'[{bg_open_label}]"
         )
         current_label = bg_open_label
