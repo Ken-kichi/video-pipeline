@@ -19,7 +19,7 @@ MODEL_EXTRACT = os.environ.get("CLAUDE_MODEL_EXTRACT", "claude-haiku-4-5-2025100
 MAX_REVISION_LOOPS = 3
 
 # このスコア(0-100)以上になったらループを打ち切って採用する
-SCORE_THRESHOLD = 90
+SCORE_THRESHOLD = 80
 
 # 応答の最大トークン数（台本・スライド内容など長文生成用）。
 # スライドが多い記事ではJSON全体が大きくなるため、余裕を持たせている。
@@ -49,5 +49,9 @@ GEMINI_THUMBNAIL_MODEL = os.environ.get(
 # 読み取れないため、.envや環境変数で明示的に設定する必要がある
 # (配布元のページ・README等に記載されている表記をそのまま使う想定)。
 # 未設定の場合は概要欄にプレースホルダーが入る。
-TSUMUGI_ILLUSTRATOR_CREDIT = os.environ.get("TSUMUGI_ILLUSTRATOR_CREDIT", "")
-ZUNDAMON_ILLUSTRATOR_CREDIT = os.environ.get("ZUNDAMON_ILLUSTRATOR_CREDIT", "")
+TSUMUGI_ILLUSTRATOR_CREDIT = os.environ.get(
+    "TSUMUGI_ILLUSTRATOR_CREDIT", "坂本アヒル 様"
+)
+ZUNDAMON_ILLUSTRATOR_CREDIT = os.environ.get(
+    "ZUNDAMON_ILLUSTRATOR_CREDIT", "坂本アヒル 様"
+)

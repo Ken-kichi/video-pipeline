@@ -21,6 +21,7 @@ voicevox-synthesize = "video_pipeline.synthesize_audio:main"
 render-video = "video_pipeline.render_video:main"
 prepare-characters = "video_pipeline.prepare_characters:main"
 generate-thumbnail = "video_pipeline.generate_thumbnail:main"
+create-shorts = "video_pipeline.create_shorts:main"
 
 [build-system]
 requires = ["hatchling"]

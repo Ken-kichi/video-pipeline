@@ -26,6 +26,9 @@ uv run generate-thumbnail
 
 # 6. 動画を組み立てる(手順2の出力ディレクトリを対話的に選べる)
 uv run render-video
+
+# 7. (任意) 動画本編からYouTubeショート(9:16)を切り出す
+uv run create-shorts
 ```
 
 `--input`や`--script`のようなパスは省略すると対話的に選べるので、
@@ -35,8 +38,8 @@ uv run render-video
 `uv run voicevox-synthesize`で音声だけ生成し、`output/<実行時刻>/slides/`の
 PNG画像と合わせてタイムラインに並べる（詳細は「音声合成」参照）。
 
-完成したら、`output/<実行時刻>/final_video.mp4`と`thumbnail.png`をYouTubeに
-アップロードし、`description.txt`の内容を概要欄に貼る。**投稿前に必ず**
+完成したら、`output/<実行時刻>/final_video.mp4`・`shorts.mp4`・`thumbnail.png`を
+YouTubeにアップロードし、`description.txt`の内容を概要欄に貼る。**投稿前に必ず**
 `description.txt`内の元記事URL・立ち絵クレジットのプレースホルダーを
 実際の内容に差し替えること（詳細は「概要欄のクレジット表記について」参照）。
 
@@ -65,10 +68,15 @@ flowchart TD
 
     Out --> VS["<b>uv run voicevox-synthesize</b><br/>VOICEVOX ENGINEのみ"]
     VS --> Wav["audio/*.wav<br/>(DaVinci Resolveで手動編集する場合)"]
+
+    Final --> CS["<b>uv run create-shorts</b><br/>冒頭60秒を9:16に切り出し"]
+    Script["script.md"] -.キャッチコピー生成.-> CS
+    CS --> Shorts["shorts.mp4"]
 ```
 
 - **完全自動で動画まで作る場合**: `render-video`だけで良い（`generate-images`/`prepare-characters`は任意）
 - **DaVinci Resolveで手動編集したい場合**: `voicevox-synthesize`で音声だけ作り、`slides/`のPNGと合わせてタイムラインに並べる
+- **YouTubeショートも欲しい場合**: `final_video.mp4`ができたあとに`create-shorts`を実行する
 
 いずれの場合も、完成した動画をYouTubeにアップロードし、`output/<実行時刻>/description.txt` の内容を概要欄に貼る
 （元記事URLをCLIで渡していない場合はプレースホルダーになっているので、実URLに差し替える）
@@ -346,6 +354,7 @@ code/diagramスライド側にも字幕・キャラクター表示分の下部�
 | `output/<実行時刻>/backgrounds/` | （背景生成有効時）Geminiで生成した背景イラストの元画像 |
 | `output/<実行時刻>/description.txt` | YouTube概要欄用テキスト（概要文・目次・使用技術・元記事リンク・ハッシュタグ・VOICEVOX/立ち絵クレジット） |
 | `output/<実行時刻>/thumbnail.png` | （`generate-thumbnail`実行後）YouTubeサムネイル画像（16:9, 1280x720） |
+| `output/<実行時刻>/shorts.mp4` | （`create-shorts`実行後）YouTubeショート動画（9:16, 1080x1920） |
 | `output/<実行時刻>/audio/` | （`voicevox-synthesize`実行後）セリフごとのWAV音声+manifest.json |
 | `output/<実行時刻>/final_video.mp4` | （`render-video`実行後）色分け字幕つき（立ち絵素材があれば口の開閉つき）の完成動画 |
 
@@ -368,6 +377,7 @@ video_pipeline/
 ├── loop.py                # 生成→評価→修正ループの共通ロジック
 ├── slide_image_builder.py # スライド内容(JSON、4レイアウト対応) -> PNG画像(Pillowで直接描画)
 ├── thumbnail_generator.py # サムネイル(16:9)を組み立て(背景+文字+立ち絵)
+├── shorts_generator.py    # 完成動画からYouTubeショート(9:16)を組み立て
 ├── assets/fonts/          # Noto Sans JP(スライド用:可変フォント、字幕用:静的Bold/Regular)
 ├── assets/characters/     # prepare-charactersが書き出す立ち絵PNG(口開閉2状態×2キャラ)
 ├── assets/sfx/            # ページめくり音(page_turn.mp3、同梱)
@@ -378,6 +388,7 @@ video_pipeline/
 ├── synthesize_audio.py    # CLIエントリーポイント(voicevox-synthesize)
 ├── render_video.py        # CLIエントリーポイント(render-video)
 ├── prepare_characters.py  # CLIエントリーポイント(prepare-characters)
+├── create_shorts.py       # CLIエントリーポイント(create-shorts)
 └── agents/
     ├── script_agent.py        # 台本の生成・評価・修正
     ├── slides_agent.py        # スライド内容(background_prompt, scene_number含む)の生成・評価・修正
@@ -514,6 +525,31 @@ uv run generate-thumbnail
 正しく扱えず、その画像が実質無視されてしまう不具合があったため、
 `render-video`側でサムネイルを事前に動画と同じ解像度(1920x1080)に
 リサイズしてから使うようにしている。
+
+## YouTubeショート生成
+
+`final_video.mp4`ができたあとに実行する。以前は「動画冒頭をカットし、
+Canvaで縦長キャンバスの中央に貼り付け、上下の空いたスペースに文言を入れる」
+という作業を手動で行っていたが、これを自動化した。
+
+```bash
+uv run create-shorts --video output/20260731_153000/final_video.mp4
+# または、output/*/から対話的に選ぶ
+uv run create-shorts
+```
+
+`output/<実行時刻>/shorts.mp4`（9:16, 1080x1920）に保存される
+（`--output`で変更可）。
+
+- 冒頭60秒を切り出す（`--duration`で変更可）。`script_agent`は台本の
+  0:00〜1:00を「単体でショートとして成立する概要パート」として生成する
+  設計になっているため、これに合わせたデフォルト値にしている
+- 元の16:9映像を縦長キャンバスの中央（1080x608、上下に656pxずつの帯）に配置し、
+  上段に大きく`main_text`、下段に`sub_text`を焼き込む。文言は
+  `thumbnail_agent`で生成する（サムネイルと同じキャッチコピーを使うことで、
+  動画・サムネイル・ショートの見た目に一貫性を持たせる）
+- 実際に生成した動画で、映像領域が正しく中央に配置され、上下帯にそれぞれ
+  文字が描画されていることをピクセル解析で検証済み
 
 ## 記事のコード・図をスライドに貼り付ける
 
