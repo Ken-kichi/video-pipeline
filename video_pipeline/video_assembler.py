@@ -89,6 +89,18 @@ _SUBTITLE_FONT_PATH = FONTS_DIR / "NotoSansJP-Bold.otf"
 # 無表示区間を避けるための下限。
 MIN_SLIDE_DURATION_SECONDS = 0.5
 
+# 静止画スライドに、ゆっくりとしたズームイン(Ken Burns風)を常時かけるための設定。
+# シーン分割・スライド枚数を増やしても、1枚のスライドがその表示時間中
+# 完全に無変化(ピクセル単位で1枚も動かない)だと視聴者には「止まっている」
+# ように見えてしまう。常にごくわずかにズームさせることで、スライド自体の
+# 枚数を増やさなくても「画面が生きている」印象を持たせる。
+# ズームが強すぎると文字が読みにくくなる/わざとらしくなるため、控えめな値にする。
+SLIDE_ZOOM_ENABLED = True
+SLIDE_ZOOM_END_SCALE = 1.06  # 表示終了時点でのズーム倍率(1.0=無ズーム)
+# zoompanフィルタは入力解像度が低いとガタつくため、いったん高解像度に
+# アップスケールしてからズーム・最終解像度へダウンスケールする
+_ZOOM_UPSCALE_FACTOR = 2
+
 # BGM・ページめくり音は音声(セリフ)より小さくする。0.0〜1.0の相対音量。
 BGM_VOLUME = 0.25
 PAGE_TURN_VOLUME = 0.5
@@ -521,6 +533,106 @@ def _compute_slide_transition_times(
     return times
 
 
+def _render_zoom_clip(
+    image_path: Path,
+    duration: float,
+    output_path: Path,
+    fps: int = VIDEO_FPS,
+    zoom_end_scale: float = SLIDE_ZOOM_END_SCALE,
+) -> Path:
+    """1枚の静止画から、ゆっくりズームインするKen Burns風の短い動画クリップを作る。
+
+    zoompanフィルタは経験上「フレーム数(d)」基準で動くため、指定秒数分
+    より少し多めのフレームを生成させ、最後に-tで正確な秒数に切り詰める
+    (端数フレームでのズーム量の誤差より、秒数の正確さを優先する)。
+    """
+    frame_count = max(1, round(duration * fps)) + fps  # 余裕を持って多めに生成
+    zoom_increment = (zoom_end_scale - 1.0) / max(1, round(duration * fps))
+    upscale_w = VIDEO_WIDTH * _ZOOM_UPSCALE_FACTOR
+    upscale_h = VIDEO_HEIGHT * _ZOOM_UPSCALE_FACTOR
+    zoompan_filter = (
+        f"scale={upscale_w}:{upscale_h}:force_original_aspect_ratio=increase,"
+        f"crop={upscale_w}:{upscale_h},"
+        f"zoompan=z='min(zoom+{zoom_increment:.8f},{zoom_end_scale})':"
+        f"d={frame_count}:s={VIDEO_WIDTH}x{VIDEO_HEIGHT}:fps={fps}"
+    )
+    _run_ffmpeg(
+        [
+            "-loop",
+            "1",
+            "-i",
+            str(image_path),
+            "-vf",
+            zoompan_filter,
+            "-t",
+            f"{duration:.3f}",
+            "-r",
+            str(fps),
+            "-pix_fmt",
+            "yuv420p",
+            str(output_path),
+        ]
+    )
+    return output_path
+
+
+def _build_zoom_video_timeline(
+    visual_timeline: list[tuple[Path, float]],
+    work_dir: Path,
+    fps: int = VIDEO_FPS,
+) -> list[Path]:
+    """静止画スライドのタイムラインを、Ken Burnsズーム付きの動画クリップ群に変換する。
+
+    1枚でも生成に失敗したら、そのクリップだけ諦めて元の静止画表示
+    (無ズーム)にフォールバックする(全体を止めるほどの不具合ではないため)。
+    """
+    clips_dir = work_dir / "_zoom_clips"
+    clips_dir.mkdir(parents=True, exist_ok=True)
+    clip_paths: list[Path] = []
+    for i, (image_path, duration) in enumerate(visual_timeline):
+        clip_path = clips_dir / f"clip_{i:04d}.mp4"
+        try:
+            _render_zoom_clip(image_path, duration, clip_path, fps=fps)
+            clip_paths.append(clip_path)
+        except Exception as exc:  # noqa: BLE001 1枚の失敗で全体を止めない
+            print(
+                f"  [警告] スライド{i}のズーム映像生成に失敗したため、"
+                f"静止表示にフォールバックします: {exc}"
+            )
+            fallback_path = clips_dir / f"clip_{i:04d}_static.mp4"
+            _run_ffmpeg(
+                [
+                    "-loop",
+                    "1",
+                    "-i",
+                    str(image_path),
+                    "-vf",
+                    f"scale={VIDEO_WIDTH}:{VIDEO_HEIGHT}",
+                    "-t",
+                    f"{duration:.3f}",
+                    "-r",
+                    str(fps),
+                    "-pix_fmt",
+                    "yuv420p",
+                    str(fallback_path),
+                ]
+            )
+            clip_paths.append(fallback_path)
+    return clip_paths
+
+
+def _write_video_concat_file(paths: list[Path], output_path: Path) -> Path:
+    """ffmpeg concat demuxer用の動画クリップリストファイルを書き出す(duration指定なし)。
+
+    各クリップは_render_zoom_clip側で既に正確な表示秒数に切り詰め済みのため、
+    画像用のconcatファイルと違いduration指定は不要(むしろ二重に長さを
+    指定すると食い違いの元になる)。
+    """
+    lines = [f"file '{path.resolve()}'" for path in paths]
+    output_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return output_path
+
+
 def _write_image_concat_file(
     entries: list[tuple[str, float]], output_path: Path
 ) -> Path:
@@ -637,28 +749,51 @@ def assemble_video(
     )
 
     print("=== スライド映像を生成中 ===")
-    image_concat_path = _write_image_concat_file(
-        [(str(path.resolve()), duration) for path, duration in visual_timeline],
-        work_dir / "images_concat.txt",
-    )
     silent_video_path = work_dir / "silent_video.mp4"
-    _run_ffmpeg(
-        [
-            "-f",
-            "concat",
-            "-safe",
-            "0",
-            "-i",
-            str(image_concat_path),
-            # サムネイル(1280x720)のように画像サイズが異なるものが混ざっても
-            # 動画解像度に統一する(アスペクト比は同じ16:9なので歪みは出ない)
-            "-vf",
-            f"scale={VIDEO_WIDTH}:{VIDEO_HEIGHT},fps={VIDEO_FPS},format=yuv420p",
-            "-r",
-            str(VIDEO_FPS),
-            str(silent_video_path),
-        ]
-    )
+    if SLIDE_ZOOM_ENABLED:
+        # 各スライドをKen Burns風のゆっくりズーム動画クリップに変換してから
+        # 連結する(完全な静止画のまま並べると、シーンを増やしても表示時間中
+        # 画面が一切動かず「止まっている」印象を与えてしまうため)
+        print("  各スライドにゆっくりズームを適用中(Ken Burns風)...")
+        zoom_clip_paths = _build_zoom_video_timeline(visual_timeline, work_dir)
+        video_concat_path = _write_video_concat_file(
+            zoom_clip_paths, work_dir / "video_clips_concat.txt"
+        )
+        _run_ffmpeg(
+            [
+                "-f",
+                "concat",
+                "-safe",
+                "0",
+                "-i",
+                str(video_concat_path),
+                "-c",
+                "copy",
+                str(silent_video_path),
+            ]
+        )
+    else:
+        image_concat_path = _write_image_concat_file(
+            [(str(path.resolve()), duration) for path, duration in visual_timeline],
+            work_dir / "images_concat.txt",
+        )
+        _run_ffmpeg(
+            [
+                "-f",
+                "concat",
+                "-safe",
+                "0",
+                "-i",
+                str(image_concat_path),
+                # サムネイル(1280x720)のように画像サイズが異なるものが混ざっても
+                # 動画解像度に統一する(アスペクト比は同じ16:9なので歪みは出ない)
+                "-vf",
+                f"scale={VIDEO_WIDTH}:{VIDEO_HEIGHT},fps={VIDEO_FPS},format=yuv420p",
+                "-r",
+                str(VIDEO_FPS),
+                str(silent_video_path),
+            ]
+        )
 
     print("=== 音声・映像・字幕を合成中 ===")
     ass_path_arg = _quote_ffmpeg_filter_value(str(ass_path.resolve()))
