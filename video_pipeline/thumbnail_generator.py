@@ -44,6 +44,11 @@ TEXT_TOP_MARGIN = 50
 # なることが確認された)。YouTubeのサムネイルは120〜350px程度の小さい
 # サイズで一瞬(1〜2秒)見て判断されるものなので、情報量を絞って「1つの
 # 焦点+大きな文字」に立ち戻す方向に調整している。
+# さらに、実際に「良質なサムネイルギャラリー」を確認したところ、共通して
+# いたのは(1)濃い1色の力強い背景(オレンジ・黄色・黒など。dark navyに限らない)
+# (2)視覚要素は写真1枚・イラスト1体・単純な図形1つのいずれかに絞られている
+# (3)補助的な要素があっても「Ai」アイコンのような小さいバッジ程度、という
+# 3点だったため、これも指示に反映している。
 GEMINI_THUMBNAIL_STYLE = (
     "YouTube thumbnail design, 16:9 aspect ratio. This must look like a real, "
     "high click-through-rate YouTube thumbnail — NOT a slide, infographic, or "
@@ -53,15 +58,21 @@ GEMINI_THUMBNAIL_STYLE = (
     "The headline text is the most important element: render it huge, bold, "
     "and ultra-legible, filling a large portion of the frame, with strong "
     "outline/contrast so it reads instantly even at a tiny preview size. "
-    "You may add at most ONE simple, bold supporting visual (a single icon, "
-    "symbol, silhouette, or one dramatic before/after visual) that reinforces "
-    "the headline's meaning. Do NOT create multiple side-by-side panels, "
-    "comparison boxes, flowcharts, or diagrams with several small labels — "
-    "that reads as a slide, not a thumbnail, and becomes illegible at small "
-    "preview sizes. Do not add any supporting text beyond the given headline/"
-    "subheading; if the one supporting visual needs a label, use at most one "
-    "or two words in large type. Dark, high-contrast background with bold "
-    "accent colors. Professional, punchy, uncluttered. "
+    "You may add at most ONE simple, bold supporting visual that reinforces "
+    "the headline's meaning — this can be a single striking photo/portrait-"
+    "style visual (e.g. a reacting face), a single illustrated character, or "
+    "one simple icon/symbol/before-after visual. Do NOT create multiple "
+    "side-by-side panels, comparison boxes, flowcharts, or diagrams with "
+    "several small labels — that reads as a slide, not a thumbnail, and "
+    "becomes illegible at small preview sizes. Do not add any supporting "
+    "text beyond the given headline/subheading, other than optionally one "
+    "tiny badge-style label in a corner (a short 1-4 character tag, like a "
+    "small icon chip) if it fits the theme. "
+    "Use a bold, saturated, high-contrast solid-color background (a single "
+    "strong color such as vivid orange, yellow, deep black, or dark navy — "
+    "vary it to fit the content rather than defaulting to dark navy every "
+    "time) rather than a busy or photorealistic backdrop. Professional, "
+    "punchy, uncluttered. "
     "No watermarks, no logos, no borders."
 )
 
