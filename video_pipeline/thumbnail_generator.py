@@ -37,22 +37,31 @@ SUB_TEXT_COLOR = "#FFE066"
 TEXT_TOP_MARGIN = 50
 
 # Geminiにサムネイルを丸ごと生成させる際のスタイル指定。
-# 単に「文字+汎用的な背景」にしかならなかった(実際にそうなった)反省を踏まえ、
-# 比較図・アイコン・パネルなどの図解イラストを積極的にデザインさせる指示にしている。
+# 最初は「文字+汎用的な背景」にしかならず物足りないという指摘を受け、
+# 比較図・アイコン・パネルを積極的にデザインさせる指示に変えたところ、
+# 今度は情報量が多すぎて逆にクリックされにくいサムネイルになってしまった
+# (実際に生成した画像で、小さすぎて読めない文字が並ぶ複数パネル構成に
+# なることが確認された)。YouTubeのサムネイルは120〜350px程度の小さい
+# サイズで一瞬(1〜2秒)見て判断されるものなので、情報量を絞って「1つの
+# 焦点+大きな文字」に立ち戻す方向に調整している。
 GEMINI_THUMBNAIL_STYLE = (
-    "YouTube thumbnail design, 16:9 aspect ratio, in the style of a polished "
-    "professional tech infographic (not just text on a plain background). "
-    "Design 1-2 illustrated diagram elements or labeled panels that visually "
-    "represent the key concepts, comparison, or numbers described in the "
-    "content summary below — for example: two labeled boxes side by side for "
-    "a comparison, a network/brain icon for an AI concept, a magnifying glass "
-    "or document icon for data/analysis, arrows connecting related ideas, or "
-    "a small chart for a numeric improvement. Add short keyword labels near "
-    "the illustrations where helpful. Dark navy background with glowing "
-    "blue/purple accent lines and nodes. Bold, clean, highly legible Japanese "
-    "sans-serif typography with strong color contrast so it reads clearly "
-    "even as a small preview thumbnail. Professional, modern, well-composed "
-    "layout — avoid a plain empty background with only text. "
+    "YouTube thumbnail design, 16:9 aspect ratio. This must look like a real, "
+    "high click-through-rate YouTube thumbnail — NOT a slide, infographic, or "
+    "diagram. It will typically be viewed at a tiny size (roughly 120-350px "
+    "wide) while scrolling, so it needs an extremely simple composition with "
+    "exactly ONE clear focal point. "
+    "The headline text is the most important element: render it huge, bold, "
+    "and ultra-legible, filling a large portion of the frame, with strong "
+    "outline/contrast so it reads instantly even at a tiny preview size. "
+    "You may add at most ONE simple, bold supporting visual (a single icon, "
+    "symbol, silhouette, or one dramatic before/after visual) that reinforces "
+    "the headline's meaning. Do NOT create multiple side-by-side panels, "
+    "comparison boxes, flowcharts, or diagrams with several small labels — "
+    "that reads as a slide, not a thumbnail, and becomes illegible at small "
+    "preview sizes. Do not add any supporting text beyond the given headline/"
+    "subheading; if the one supporting visual needs a label, use at most one "
+    "or two words in large type. Dark, high-contrast background with bold "
+    "accent colors. Professional, punchy, uncluttered. "
     "No watermarks, no logos, no borders."
 )
 
@@ -112,10 +121,13 @@ def build_gemini_thumbnail_prompt(
 ) -> str:
     """Geminiにサムネイルを丸ごと生成させるためのプロンプトを組み立てる。
 
-    main_text/sub_textだけを渡すと「文字+汎用的な背景」にしかならなかった
-    (実際にそうなった)ため、visual_summary(動画の核心的な内容の要約)を
-    渡し、それをもとにGeminiが比較図・アイコンなどの図解イラストを
-    自律的にデザインできるようにしている。
+    最初はmain_text/sub_textだけを渡していたが「文字+汎用的な背景」にしか
+    ならず物足りなかった。そこでvisual_summary(動画の核心的な内容の要約)を
+    渡し、比較図・アイコンなどの図解を自律的にデザインさせる指示に変えた
+    ところ、今度は情報量が多すぎて逆にクリックされにくいサムネイルになって
+    しまった(実際に生成された画像で確認された)。visual_summaryは「複数の
+    パネルを作る材料」ではなく「たった1つの視覚要素を選ぶための参考情報」
+    として使うよう明示している。
     """
     lines = [
         "Design a YouTube video thumbnail image.",
@@ -126,12 +138,14 @@ def build_gemini_thumbnail_prompt(
             f'Render this exact Japanese text smaller, as a subheading near it: "{sub_text}"'
         )
     if visual_summary:
-        lines.append(f"Content summary to base the illustration on: {visual_summary}")
+        lines.append(
+            f"Content summary (for context only, to help you choose ONE simple "
+            f"supporting visual — do not try to depict all of this in the image): "
+            f"{visual_summary}"
+        )
     lines.append(
         "Do not misspell, translate, or alter the given headline/subheading text. "
-        "Short keyword labels for the illustrated diagram elements are fine "
-        "(see style guidance below), but do not add unrelated extra text, "
-        "watermarks, or logos."
+        "Do not add any other text, watermarks, or logos beyond what is described below."
     )
     lines.append(GEMINI_THUMBNAIL_STYLE)
     return " ".join(lines)

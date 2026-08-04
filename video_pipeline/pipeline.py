@@ -228,7 +228,11 @@ def run_pipeline(
 
     print("=== 概要欄エージェント ===")
     description, description_score, _ = description_agent.run(script, article_url)
-    description = f"{description}\n\n{description_agent.build_credits_block()}"
+    description = (
+        f"【YouTubeタイトル】\n{video_title}\n\n"
+        f"{description}\n\n"
+        f"{description_agent.build_credits_block()}"
+    )
 
     output_dir_path = Path(output_dir) / datetime.now().strftime("%Y%m%d_%H%M%S")
 
