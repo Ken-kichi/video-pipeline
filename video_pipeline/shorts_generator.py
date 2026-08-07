@@ -27,6 +27,8 @@ _SCALED_VIDEO_HEIGHT = round(SHORTS_WIDTH * 9 / 16 / 2) * 2
 BAR_HEIGHT = (SHORTS_HEIGHT - _SCALED_VIDEO_HEIGHT) // 2
 
 DEFAULT_SHORTS_DURATION_SECONDS = 60.0
+# ショート動画だけにかける再生速度倍率(視聴維持率を意識して本編より速く見せる)
+DEFAULT_SHORTS_SPEED = 1.5
 # 指定秒数の前後何秒まで無音区間(自然な切れ目)を探すか
 CUTOFF_SEARCH_WINDOW_SECONDS = 4.0
 # 無音とみなす音量閾値・最低継続時間(ffmpeg silencedetect用)
@@ -113,6 +115,21 @@ def read_scene_end_time(
     return None
 
 
+def find_overview_end_scene(script_text: str) -> int:
+    """台本から「概要パート」最後のシーン番号を求める。
+
+    script_agentの設計上、概要パート(0:00〜1:00)は単体でショートとして
+    成立するように4〜6個の短いシーンに分割され、区切りの`---`行を挟んで
+    詳細解説パートへ続く。以前は「シーン1の終わり」を決め打ちで切り出して
+    いたが、この分割ルール導入後はシーン1だけでは概要パートの途中(結論を
+    言う前)で切れてしまうため、`---`より前にある最後のシーン番号を都度読む。
+    区切りが見つからない場合(概要パートが1シーンのみの旧形式など)は1を返す。
+    """
+    overview_text = re.split(r"(?m)^---\s*$", script_text, maxsplit=1)[0]
+    scene_numbers = [int(m) for m in re.findall(r"(?m)^### シーン(\d+)", overview_text)]
+    return max(scene_numbers) if scene_numbers else 1
+
+
 def _run_ffmpeg(args: list[str]) -> subprocess.CompletedProcess:
     result = subprocess.run(["ffmpeg", "-y", *args], capture_output=True, text=True)
     if result.returncode != 0:
@@ -176,6 +193,7 @@ def build_shorts_video(
     duration: float = DEFAULT_SHORTS_DURATION_SECONDS,
     exact_end_time: float | None = None,
     work_dir: str | Path | None = None,
+    speed: float = DEFAULT_SHORTS_SPEED,
 ) -> Path:
     """完成動画の冒頭を切り出し、9:16のショート動画として書き出す。
 
@@ -189,6 +207,10 @@ def build_shorts_video(
     結局目安の秒数ぴったりで切れてしまうことがある。scene_boundaries.jsonが
     使える場合は必ずそちらを優先すること)。
     いずれの場合も、末尾には短い音声フェードアウトをかける。
+
+    speedは本編にはかけないショート動画だけの再生速度倍率(視聴維持率対策)。
+    切り出し区間(actual_duration)に対してかけるため、末尾フェードは
+    速度変換後の尺(actual_duration / speed)を基準に計算する。
     """
     source_video_path = Path(source_video_path)
     output_path = Path(output_path)
@@ -219,17 +241,19 @@ def build_shorts_video(
     top_bar.save(top_bar_path)
     bottom_bar.save(bottom_bar_path)
 
-    fade_start = max(0.0, actual_duration - END_FADE_SECONDS)
+    output_duration = actual_duration / speed
+    fade_start = max(0.0, output_duration - END_FADE_SECONDS)
     filter_complex = (
         f"color=c=0x{BAR_BG_COLOR[0]:02x}{BAR_BG_COLOR[1]:02x}{BAR_BG_COLOR[2]:02x}:"
         f"s={SHORTS_WIDTH}x{SHORTS_HEIGHT}[bg];"
-        f"[0:v]scale={SHORTS_WIDTH}:{_SCALED_VIDEO_HEIGHT}[vid];"
+        f"[0:v]scale={SHORTS_WIDTH}:{_SCALED_VIDEO_HEIGHT},setpts=PTS/{speed}[vid];"
         f"[bg][vid]overlay=x=0:y={BAR_HEIGHT}[bg_vid];"
         f"[bg_vid][1:v]overlay=x=0:y=0[bg_vid_top];"
         f"[bg_vid_top][2:v]overlay=x=0:y={SHORTS_HEIGHT - BAR_HEIGHT}[vout];"
+        f"[0:a]atempo={speed}[a_fast];"
         # 自然な切れ目にほぼ合わせているとはいえ、確実に滑らかに終わらせるため
-        # 末尾に短いフェードアウトを常にかける
-        f"[0:a]afade=t=out:st={fade_start:.3f}:d={END_FADE_SECONDS}[aout]"
+        # 末尾に短いフェードアウトを常にかける(速度変換後の尺を基準に計算)
+        f"[a_fast]afade=t=out:st={fade_start:.3f}:d={END_FADE_SECONDS}[aout]"
     )
 
     _run_ffmpeg(
@@ -255,7 +279,7 @@ def build_shorts_video(
             "-c:a",
             "aac",
             "-t",
-            f"{actual_duration:.3f}",
+            f"{output_duration:.3f}",
             str(output_path),
         ]
     )

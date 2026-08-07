@@ -4,8 +4,10 @@
 上下の空いたスペースに文言を入れる、という作業を手動で行っていた。
 このコマンドはそれを自動化する。script_agentが台本の0:00〜1:00を
 「単体でショートとして成立する概要パート」として生成する設計になっている
-ため、デフォルトでは「シーン1の終わりまで」を切り出す(--sceneで対象の
-シーン番号を変更可)。
+(4〜6個の短いシーンに分割される)ため、デフォルトでは台本の`---`区切りから
+概要パート最後のシーン番号を自動検出し、その終わりまでを切り出す
+(--sceneで対象のシーン番号を明示的に変更可)。
+切り出した映像は視聴維持率を意識して1.5倍速にする(本編には適用しない)。
 
 `render-video`が書き出す`scene_boundaries.json`（同じディレクトリにある想定）
 から、指定シーンの正確な終了時刻を読んで切り出す。見つからない場合
@@ -32,6 +34,7 @@ from video_pipeline.interactive import pick_output_run
 from video_pipeline.shorts_generator import (
     DEFAULT_SHORTS_DURATION_SECONDS,
     build_shorts_video,
+    find_overview_end_scene,
     read_scene_end_time,
 )
 
@@ -60,9 +63,9 @@ def main() -> None:
     parser.add_argument(
         "--scene",
         type=int,
-        default=1,
-        help="このシーン番号の終わりまでを切り出す(デフォルト1=概要パート)。"
-        "scene_boundaries.jsonが無い場合は使われない",
+        default=None,
+        help="このシーン番号の終わりまでを切り出す(省略時は台本から概要パートの"
+        "最後のシーンを自動検出)。scene_boundaries.jsonが無い場合は使われない",
     )
     parser.add_argument(
         "--duration",
@@ -96,18 +99,22 @@ def main() -> None:
 
     output_path = Path(args.output) if args.output else video_path.parent / "shorts.mp4"
 
+    script_text = script_path.read_text(encoding="utf-8")
+    scene = args.scene if args.scene is not None else find_overview_end_scene(script_text)
+    if args.scene is None:
+        print(f"  台本から概要パートの最後のシーンを自動検出しました: シーン{scene}")
+
     scene_boundaries_path = video_path.parent / "scene_boundaries.json"
-    exact_end_time = read_scene_end_time(scene_boundaries_path, args.scene)
+    exact_end_time = read_scene_end_time(scene_boundaries_path, scene)
     if exact_end_time is None:
         print(
             f"  [警告] {scene_boundaries_path} が見つからないか、"
-            f"シーン{args.scene}の情報がありません。"
+            f"シーン{scene}の情報がありません。"
             f"目安{args.duration}秒付近の自然な切れ目で代用します"
             "(render-videoを最新版で再実行するとscene_boundaries.jsonが作られます)"
         )
 
     print("=== ショート用フック文言を生成中 ===")
-    script_text = script_path.read_text(encoding="utf-8")
     shorts_copy = shorts_agent.generate(script_text)
     print(f"  hook_text  : {shorts_copy['hook_text']}")
     print(f"  follow_text: {shorts_copy['follow_text']}")
