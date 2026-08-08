@@ -8,7 +8,11 @@
      生成する設計になっているため、これに合わせている)を切り出す。
      指定秒数ぴったりで切ると、セリフの途中で途切れてしまう不具合が
      実際に発生したため、指定秒数付近の無音区間(セリフの間)を検出し、
-     そこに合わせて実際の切り出し秒数を調整する
+     そこに合わせて実際の切り出し秒数を調整する。ただし先頭のタイトル/
+     サムネイル静止区間(TITLE_SLIDE_DURATION_SECONDS)はスキップし、
+     本編の動きが始まる最初のシーンから切り出す(静止画始まりはショートの
+     「視聴を選択した割合」を大きく下げることが実際のアナリティクスで
+     確認されたため)
   2. 9:16の縦長キャンバスの中央に、元の16:9映像を配置する
   3. 上下の余白に、shorts_agentが生成するフック文言を大きく焼き込む
 """
@@ -19,6 +23,8 @@ import subprocess
 from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont
+
+from video_pipeline.video_assembler import TITLE_SLIDE_DURATION_SECONDS
 
 SHORTS_WIDTH = 1080
 SHORTS_HEIGHT = 1920
@@ -194,6 +200,7 @@ def build_shorts_video(
     exact_end_time: float | None = None,
     work_dir: str | Path | None = None,
     speed: float = DEFAULT_SHORTS_SPEED,
+    start_offset: float = TITLE_SLIDE_DURATION_SECONDS,
 ) -> Path:
     """完成動画の冒頭を切り出し、9:16のショート動画として書き出す。
 
@@ -208,9 +215,18 @@ def build_shorts_video(
     使える場合は必ずそちらを優先すること)。
     いずれの場合も、末尾には短い音声フェードアウトをかける。
 
+    start_offsetは、切り出し開始位置を動画の先頭(0秒)からこの秒数分だけ
+    後ろにずらす(デフォルトは本編のタイトル/サムネイル静止区間の長さ
+    TITLE_SLIDE_DURATION_SECONDSと同じ)。ショートはフィード上でミュート
+    自動再生され、最初の一瞬で「見る/スキップ」が決まるため、動きのない
+    静止画から始まると視聴維持率データ上の「視聴を選択した割合」が
+    大きく落ちることが実際に確認された。本編の動きが始まる最初のシーンから
+    ショートを始めるため、静止区間はスキップする(本編側のタイトル演出は
+    変更しない)。
+
     speedは本編にはかけないショート動画だけの再生速度倍率(視聴維持率対策)。
-    切り出し区間(actual_duration)に対してかけるため、末尾フェードは
-    速度変換後の尺(actual_duration / speed)を基準に計算する。
+    切り出し区間(trimmed_duration)に対してかけるため、末尾フェードは
+    速度変換後の尺(trimmed_duration / speed)を基準に計算する。
     """
     source_video_path = Path(source_video_path)
     output_path = Path(output_path)
@@ -230,6 +246,14 @@ def build_shorts_video(
                 f"({actual_duration:.2f}秒)に合わせて調整しました"
             )
 
+    # 切り出す長さに対して静止区間が長すぎる(極端に短い動画など)場合は
+    # スキップせず先頭から使う
+    if start_offset >= actual_duration:
+        start_offset = 0.0
+    trimmed_duration = actual_duration - start_offset
+    if start_offset > 0:
+        print(f"  冒頭の静止区間{start_offset:.2f}秒をスキップして切り出します")
+
     top_bar = _build_text_bar(
         main_text, SHORTS_WIDTH, BAR_HEIGHT, TOP_FONT_SIZE, TEXT_COLOR
     )
@@ -241,7 +265,7 @@ def build_shorts_video(
     top_bar.save(top_bar_path)
     bottom_bar.save(bottom_bar_path)
 
-    output_duration = actual_duration / speed
+    output_duration = trimmed_duration / speed
     fade_start = max(0.0, output_duration - END_FADE_SECONDS)
     filter_complex = (
         f"color=c=0x{BAR_BG_COLOR[0]:02x}{BAR_BG_COLOR[1]:02x}{BAR_BG_COLOR[2]:02x}:"
@@ -258,8 +282,10 @@ def build_shorts_video(
 
     _run_ffmpeg(
         [
+            "-ss",
+            f"{start_offset:.3f}",
             "-t",
-            f"{actual_duration:.3f}",
+            f"{trimmed_duration:.3f}",
             "-i",
             str(source_video_path),
             "-i",
