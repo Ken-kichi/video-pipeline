@@ -234,7 +234,11 @@ def _render_bullets(
 ) -> None:
     """タイトル+箇条書き(標準レイアウト)。"""
     title_font = _load_font(56, weight=700)
-    body_font = _load_font(38, weight=400)
+    # ショート動画では、この本編スライドが縦長キャンバス中央の高さ約6割の
+    # 帯に縮小されて埋め込まれる(shorts_generator.py)。本編(1920x1080)では
+    # 38pxで問題なくても、その縮小後はスマホ画面上でほぼ読めなくなるため、
+    # 補助テキストは本編の見た目を崩さない範囲で大きめにしておく。
+    body_font = _load_font(44, weight=400)
     body_max_width = SLIDE_WIDTH - MARGIN * 2
 
     title_lines = _wrap_text(
@@ -261,7 +265,8 @@ def _render_stat(img: Image.Image, draw: ImageDraw.ImageDraw, slide_data: dict) 
     has_background = bool(slide_data.get("background_path"))
 
     if title:
-        title_font = _load_font(40, weight=700)
+        # ショート動画に縮小埋め込みされた際でも読める大きさにする(_render_bullets参照)
+        title_font = _load_font(56, weight=700)
         title_lines = _wrap_text(draw, title, title_font, SLIDE_WIDTH - MARGIN * 2)
         _draw_lines_centered(
             draw, title_lines, title_font, SLIDE_WIDTH // 2, 110, SUBTITLE_COLOR
@@ -281,7 +286,7 @@ def _render_stat(img: Image.Image, draw: ImageDraw.ImageDraw, slide_data: dict) 
     _draw_lines_centered(draw, stat_lines, stat_font, SLIDE_WIDTH // 2, y, ACCENT_COLOR)
 
     if stat_label:
-        label_font = _load_font(34, weight=400)
+        label_font = _load_font(48, weight=400)
         label_lines = _wrap_text(draw, stat_label, label_font, SLIDE_WIDTH - MARGIN * 2)
         _draw_lines_centered(
             draw,
@@ -306,7 +311,7 @@ def _render_quote(
 
     quote_font = _load_font(88, weight=700)
     quote_lines = _wrap_text(draw, quote_text, quote_font, SLIDE_WIDTH - MARGIN * 2)
-    context_font = _load_font(32, weight=400)
+    context_font = _load_font(40, weight=400)
     context_lines = (
         _wrap_text(draw, quote_context, context_font, SLIDE_WIDTH - MARGIN * 2)
         if quote_context
@@ -333,8 +338,8 @@ def _render_comparison(
 ) -> None:
     """2つの対象を左右に並べて比較するレイアウト。"""
     title_font = _load_font(56, weight=700)
-    label_font = _load_font(40, weight=700)
-    body_font = _load_font(34, weight=400)
+    label_font = _load_font(48, weight=700)
+    body_font = _load_font(40, weight=400)
 
     title_lines = _wrap_text(
         draw, slide_data.get("title", ""), title_font, SLIDE_WIDTH - MARGIN * 2
