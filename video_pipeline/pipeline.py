@@ -36,6 +36,7 @@ from video_pipeline.code_renderer import render_code_image
 from video_pipeline.config import (
     GENERATE_SLIDE_IMAGES,
     MAX_REVISION_LOOPS,
+    MENTION_ARTICLE,
     SCORE_THRESHOLD,
 )
 from video_pipeline.diagram_renderer import render_mermaid_diagram
@@ -194,12 +195,14 @@ def run_pipeline(
     video_title: str | None = None,
     article_url: str | None = None,
     generate_images: bool | None = None,
+    mention_article: bool | None = None,
 ) -> dict:
     article_text = read_markdown(article_path)
     article_url = article_url or DEFAULT_ARTICLE_URL_PLACEHOLDER
     generate_images = (
         GENERATE_SLIDE_IMAGES if generate_images is None else generate_images
     )
+    mention_article = MENTION_ARTICLE if mention_article is None else mention_article
 
     if video_title is None:
         video_title = extract_h1_title(article_text) or DEFAULT_VIDEO_TITLE
@@ -213,7 +216,7 @@ def run_pipeline(
         )
 
     print("=== 台本エージェント ===")
-    script, script_score, _ = script_agent.run(article_text)
+    script, script_score, _ = script_agent.run(article_text, mention_article)
 
     print("=== スライドエージェント ===")
     slides, slides_score, _ = slides_agent.run(article_text, script, asset_summary)
@@ -227,7 +230,9 @@ def run_pipeline(
     )
 
     print("=== 概要欄エージェント ===")
-    description, description_score, _ = description_agent.run(script, article_url)
+    description, description_score, _ = description_agent.run(
+        script, article_url, mention_article
+    )
     description = (
         f"【YouTubeタイトル】\n{video_title}\n\n"
         f"{description}\n\n"

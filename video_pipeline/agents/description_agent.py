@@ -7,7 +7,7 @@
 - 動画の概要文（何がわかるか・見るメリット）
 - タイムスタンプ付きの目次（YouTubeのチャプター機能に対応する形式）
 - （任意）使用技術・ライブラリ
-- 元記事(Zenn/note等)のURLを貼る行
+- （include_article_link有効時のみ）元記事(Zenn/note等)のURLを貼る行
 - 関連ハッシュタグ
 - VOICEVOX/立ち絵のクレジット（LLM生成ではなく決定的に付け足す。利用規約上
   必須の表記なので、LLMに書かせて表現を変えられたり抜け落ちたりしないようにする）
@@ -41,14 +41,21 @@ GENERATE_SYSTEM = """あなたはYouTube動画の概要欄作成担当です。�
    - URLは書かない（実在しないURLを創作するリスクを避けるため、名前だけ書く。
      リンクを付けたい場合は人間が後から追記する前提）
    - 台本・記事に技術要素がほとんど無い場合はこのブロックを省略してよい
-4. 空行を挟んで「元記事」という見出しと、渡された元記事URLをそのまま1行で記載
-5. 空行を挟んで関連ハッシュタグを3〜5個（#機械学習 のような形式）
-
+{article_section}
 制約:
-- 元記事URLが "（URL未設定）" のようなプレースホルダーの場合は、それをそのまま記載する
-  （実在しないURLを創作しない）
 - 出力は上記ブロックのプレーンテキストのみ。前置きや説明文、コードフェンスは不要
   （VOICEVOXやイラストのクレジット表記は書かなくてよい。別途決定的に付け足すため）
+"""
+
+ARTICLE_SECTION_INSTRUCTION = """4. 空行を挟んで「元記事」という見出しと、渡された元記事URLをそのまま1行で記載
+   - 元記事URLが "（URL未設定）" のようなプレースホルダーの場合は、それをそのまま記載する
+     （実在しないURLを創作しない）
+5. 空行を挟んで関連ハッシュタグを3〜5個（#機械学習 のような形式）
+"""
+
+ARTICLE_SECTION_OMIT_INSTRUCTION = """4. 空行を挟んで関連ハッシュタグを3〜5個（#機械学習 のような形式）
+   - 今回は元記事の紹介が不要な回のため、「元記事」という見出しやURLへの
+     言及は一切含めないこと
 """
 
 EVALUATE_SYSTEM = """あなたはYouTube概要欄のレビュアーです。動画台本と概要欄テキストを
@@ -61,14 +68,22 @@ EVALUATE_SYSTEM = """あなたはYouTube概要欄のレビュアーです。動�
 - 目次の時刻・順序が台本のシーン展開と一致しているか
 - 使用技術セクションに実在しないURLが創作されていないか（無くて良い、
   あるなら名前だけであるべき）
-- 元記事URLを貼る行が存在するか（プレースホルダーのままでも構わない）
-- ハッシュタグが動画の内容に関連しているか
+{article_criterion}- ハッシュタグが動画の内容に関連しているか
 
-JSON形式 {"score": <int>, "feedback": "<改善点。問題なければ空文字>"} のみを返してください。
+JSON形式 {{"score": <int>, "feedback": "<改善点。問題なければ空文字>"}} のみを返してください。
 """
 
+ARTICLE_EVALUATE_CRITERION = (
+    "- 元記事URLを貼る行が存在するか（プレースホルダーのままでも構わない）\n"
+)
+
+ARTICLE_EVALUATE_OMIT_CRITERION = (
+    "- 今回は元記事の紹介が不要な回のため、「元記事」という見出しやURLへの"
+    "言及が含まれていないか（含まれていたら減点する）\n"
+)
+
 REVISE_SYSTEM = """あなたは概要欄の修正担当です。フィードバックに基づいて概要欄テキストを
-修正してください。出力は概要文・目次・(使用技術)・元記事URL・ハッシュタグを
+修正してください。出力は{content_desc}を
 含むプレーンテキストのみ（VOICEVOX/イラストのクレジットは書かなくてよい）。
 """
 
@@ -101,35 +116,60 @@ def build_credits_block(
     )
 
 
-def generate(script: str, article_url: str) -> str:
-    user = (
-        f"# 動画台本\n\n{script}\n\n# 元記事URL\n\n{article_url}\n\n"
-        "上記から動画概要欄のテキストを作成してください。"
+def generate(script: str, article_url: str, include_article_link: bool = True) -> str:
+    article_section = (
+        ARTICLE_SECTION_INSTRUCTION if include_article_link else ARTICLE_SECTION_OMIT_INSTRUCTION
     )
-    return call_text(GENERATE_SYSTEM, user, model=MODEL_GENERATE)
+    system = GENERATE_SYSTEM.format(article_section=article_section)
+    user = f"# 動画台本\n\n{script}\n\n"
+    if include_article_link:
+        user += f"# 元記事URL\n\n{article_url}\n\n"
+    user += "上記から動画概要欄のテキストを作成してください。"
+    return call_text(system, user, model=MODEL_GENERATE)
 
 
-def evaluate(script: str, description: str) -> dict:
+def evaluate(script: str, description: str, include_article_link: bool = True) -> dict:
+    article_criterion = (
+        ARTICLE_EVALUATE_CRITERION if include_article_link else ARTICLE_EVALUATE_OMIT_CRITERION
+    )
+    system = EVALUATE_SYSTEM.format(article_criterion=article_criterion)
     user = (
         f"# 動画台本\n\n{script}\n\n# 現在の概要欄テキスト\n\n{description}\n\n"
         "上記を評価してください。"
     )
-    return call_json(EVALUATE_SYSTEM, user, model=MODEL_EVALUATE)
+    return call_json(system, user, model=MODEL_EVALUATE)
 
 
-def revise(script: str, description: str, feedback: str) -> str:
+def revise(
+    script: str, description: str, feedback: str, include_article_link: bool = True
+) -> str:
+    content_desc = (
+        "概要文・目次・(使用技術)・元記事URL・ハッシュタグ"
+        if include_article_link
+        else "概要文・目次・(使用技術)・ハッシュタグ（元記事の紹介は含めない）"
+    )
+    system = REVISE_SYSTEM.format(content_desc=content_desc)
     user = (
         f"# 動画台本\n\n{script}\n\n# 現在の概要欄テキスト\n\n{description}\n\n"
         f"# フィードバック\n\n{feedback}\n\n上記フィードバックを反映して修正してください。"
     )
-    return call_text(REVISE_SYSTEM, user, model=MODEL_GENERATE)
+    return call_text(system, user, model=MODEL_GENERATE)
 
 
-def run(script: str, article_url: str) -> tuple[str, int, list[dict]]:
-    """概要欄テキストの生成→評価→修正ループを実行する。"""
+def run(
+    script: str, article_url: str, include_article_link: bool = True
+) -> tuple[str, int, list[dict]]:
+    """概要欄テキストの生成→評価→修正ループを実行する。
+
+    include_article_link: Falseの場合、「元記事」セクションを省略する
+    （台本エージェント側で「概要欄の元記事を見てほしい」という案内を
+    入れない設定のときはFalseにして揃える）。
+    """
     return run_with_evaluation_loop(
         label=LABEL,
-        generate=lambda: generate(script, article_url),
-        evaluate=lambda description: evaluate(script, description),
-        revise=lambda description, feedback: revise(script, description, feedback),
+        generate=lambda: generate(script, article_url, include_article_link),
+        evaluate=lambda description: evaluate(script, description, include_article_link),
+        revise=lambda description, feedback: revise(
+            script, description, feedback, include_article_link
+        ),
     )

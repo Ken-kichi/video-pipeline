@@ -55,3 +55,8 @@ TSUMUGI_ILLUSTRATOR_CREDIT = os.environ.get(
 ZUNDAMON_ILLUSTRATOR_CREDIT = os.environ.get(
     "ZUNDAMON_ILLUSTRATOR_CREDIT", "坂本アヒル 様"
 )
+
+# 概要欄に元記事を紹介し、動画の最後でも「概要欄の元記事を見てほしい」と
+# 案内するかどうか。元記事を用意していない回はCLIの --no-mention-article か
+# 環境変数 MENTION_ARTICLE=0 で無効化できる。
+MENTION_ARTICLE = os.environ.get("MENTION_ARTICLE", "1") == "1"

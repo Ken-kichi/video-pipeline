@@ -115,7 +115,7 @@ flowchart TD
 5つのCLI（`video-pipeline` / `generate-thumbnail` / `prepare-characters` /
 `voicevox-synthesize` / `render-video`）は、
 引数（パス指定の`--input`/`--script`系だけでなく、`--title`・`--article-url`・
-`--generate-images`・`--base-url`のようなオプションも含む）を省略すると、
+`--mention-article`・`--generate-images`・`--base-url`のようなオプションも含む）を省略すると、
 対話端末上で矢印キー選択できるメニューが出る。「自動でよいか／自分で指定するか」
 を選び、指定する場合だけテキスト入力を求められる形にしているので、使わない
 オプションのために毎回何かを入力する必要は無い。非対話環境（パイプ実行など）で
@@ -126,13 +126,22 @@ flowchart TD
 ```bash
 uv run video-pipeline --input articles/sample.md --title "機械学習ってなに？" \
   --article-url "https://zenn.dev/xxxxx/articles/xxxxx" \
+  --mention-article \
   --generate-images
-# または、全て対話的に選ぶ(記事選択→タイトル→URL→背景生成の有無、の順に聞かれる)
+# または、全て対話的に選ぶ(記事選択→タイトル→元記事を紹介するか→URL→背景生成の有無、の順に聞かれる)
 uv run video-pipeline
 ```
 
 `--title` を省略した場合、記事の見出し1（`# 〜`で始まる行）を自動でタイトルに使う。
 見出し1が記事に無ければ「解説動画」になる。
+
+`--mention-article` / `--no-mention-article` で、概要欄に元記事を紹介するかどうかを
+切り替えられる（未指定なら対話的に選べる。デフォルトは紹介する＝有効。環境変数
+`MENTION_ARTICLE=0`でデフォルト自体も変更可）。有効な場合、動画の最後に
+「詳しくは概要欄の元記事もチェックしてほしい」という案内セリフが台本に入り、
+概要欄にも「元記事」セクションが作られる。`--no-mention-article`を指定すると
+`--article-url`の入力も聞かれず、動画内の案内・概要欄の「元記事」セクションの
+どちらも作られない（元記事を用意していない回向け）。
 
 `--article-url` を省略した場合、概要欄の元記事リンク部分にはプレースホルダーが入るので、
 投稿時に手動で差し替える。
@@ -353,7 +362,7 @@ code/diagramスライド側にも字幕・キャラクター表示分の下部�
 | `output/<実行時刻>/voicevox_script.txt` | `[話者名] セリフ` 形式の読み上げ用テキスト |
 | `output/<実行時刻>/slides/` | スライド画像一式(PNG、1枚=1スライド。表紙は`slide_00_title.png`) |
 | `output/<実行時刻>/backgrounds/` | （背景生成有効時）Geminiで生成した背景イラストの元画像 |
-| `output/<実行時刻>/description.txt` | YouTubeタイトル・概要欄用テキスト（タイトル・概要文・目次・使用技術・元記事リンク・ハッシュタグ・VOICEVOX/立ち絵クレジット） |
+| `output/<実行時刻>/description.txt` | YouTubeタイトル・概要欄用テキスト（タイトル・概要文・目次・使用技術・（`--mention-article`有効時のみ）元記事リンク・ハッシュタグ・VOICEVOX/立ち絵クレジット） |
 | `output/<実行時刻>/thumbnail.png` | （`generate-thumbnail`実行後）YouTubeサムネイル画像（16:9, 1280x720） |
 | `output/<実行時刻>/shorts.mp4` | （`create-shorts`実行後）YouTubeショート動画（9:16, 1080x1920） |
 | `output/<実行時刻>/audio/` | （`voicevox-synthesize`実行後）セリフごとのWAV音声+manifest.json |
@@ -417,6 +426,8 @@ video_pipeline/
 - `MAX_REVISION_LOOPS`: 各エージェント（総合エージェントを含む）の生成→評価→修正ループの最大回数（デフォルト3。
   減らすとコストも下がるが、品質基準に届く前にループが打ち切られやすくなる）
 - `SCORE_THRESHOLD`: この点数(0-100)以上で合格とみなす。総合エージェントの整合性スコアにも適用される（デフォルト90）
+- `MENTION_ARTICLE`（環境変数）: 概要欄に元記事を紹介し、動画内でも案内するか
+  （デフォルトはオン。CLIの`--mention-article`/`--no-mention-article`で実行ごとに上書き可能）
 - `GENERATE_SLIDE_IMAGES`（環境変数）: スライド背景生成を有効にするか（デフォルトはオフ）
 - `GEMINI_IMAGE_MODEL`（環境変数）: 背景生成に使うGeminiモデル。デフォルト `gemini-3.1-flash-image-preview`
   （Nano Banana 2。より高品質・高価な `gemini-3-pro-image-preview` に変更も可能）

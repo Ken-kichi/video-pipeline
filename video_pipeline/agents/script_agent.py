@@ -105,6 +105,20 @@ GENERATE_SYSTEM = """あなたはVOICEVOX実況動画（ずんだもん×春日�
 - 出力はMarkdown形式の台本のみ。前置きや説明文は不要
 """
 
+ARTICLE_MENTION_INSTRUCTION = """
+- 【重要・必須】動画の最後のシーン（エンディング）で、つむぎかずんだもんの
+  どちらかが「もっと詳しく知りたい人は、概要欄に貼ってある元記事もチェック
+  してほしい」という趣旨の案内を1〜2行のセリフで入れる。毎回同じ言い回しを
+  コピーするのではなく、そのキャラクターの口調に合わせた自然な一言にする
+  （例: ずんだもん「もっと詳しく知りたい人は、概要欄に貼ってある元記事も
+  チェックしてほしいのだ！」）
+"""
+
+ARTICLE_MENTION_EVALUATE_CRITERION = (
+    "- 【重要】動画の最後に「概要欄の元記事を見てほしい」という趣旨の案内セリフが"
+    "入っているか（入っていなければ必ず減点し、どのシーンに追加すべきか具体的に指摘する）"
+)
+
 EVALUATE_SYSTEM = """あなたは動画台本のレビュアーです。元記事と台本を照らし合わせ、
 以下の観点で0〜100点の総合スコアと、改善が必要な点の具体的なフィードバックを返してください。
 
@@ -158,7 +172,9 @@ EVALUATE_SYSTEM = """あなたは動画台本のレビュアーです。元記�
 - つむぎの相槌が「そうです」「その通り」ばかりで単調になっていないか
 - シーンの終わりが毎回「それでは見ていきましょう」的な同じ言い回しに
   なっていないか（次への引きのバリエーションがあるか）
+"""
 
+EVALUATE_SYSTEM_FOOTER = """
 JSON形式 {"score": <int>, "feedback": "<改善点。問題なければ空文字>"} のみを返してください。
 """
 
@@ -168,14 +184,17 @@ REVISE_SYSTEM = """あなたは動画台本の修正担当です。渡された�
 """
 
 
-def generate(article_text: str) -> str:
+def generate(article_text: str, mention_article: bool = True) -> str:
+    system = GENERATE_SYSTEM + ARTICLE_MENTION_INSTRUCTION if mention_article else GENERATE_SYSTEM
     user = f"# 元記事\n\n{article_text}\n\n上記の記事から動画台本を作成してください。"
-    return call_text(GENERATE_SYSTEM, user, model=MODEL_GENERATE)
+    return call_text(system, user, model=MODEL_GENERATE)
 
 
-def evaluate(article_text: str, script: str) -> dict:
+def evaluate(article_text: str, script: str, mention_article: bool = True) -> dict:
+    criterion = f"{ARTICLE_MENTION_EVALUATE_CRITERION}\n" if mention_article else ""
+    system = EVALUATE_SYSTEM + criterion + EVALUATE_SYSTEM_FOOTER
     user = f"# 元記事\n\n{article_text}\n\n# 台本\n\n{script}\n\n上記の台本を評価してください。"
-    return call_json(EVALUATE_SYSTEM, user, model=MODEL_EVALUATE)
+    return call_json(system, user, model=MODEL_EVALUATE)
 
 
 def revise(article_text: str, script: str, feedback: str) -> str:
@@ -186,11 +205,16 @@ def revise(article_text: str, script: str, feedback: str) -> str:
     return call_text(REVISE_SYSTEM, user, model=MODEL_GENERATE)
 
 
-def run(article_text: str) -> tuple[str, int, list[dict]]:
-    """台本の生成→評価→修正ループを実行する。"""
+def run(article_text: str, mention_article: bool = True) -> tuple[str, int, list[dict]]:
+    """台本の生成→評価→修正ループを実行する。
+
+    mention_article: Trueの場合、動画の最後に「概要欄の元記事を見てほしい」
+    という案内セリフを入れるよう指示する（概要欄エージェント側で元記事を
+    紹介しない設定のときはFalseにして揃える）。
+    """
     return run_with_evaluation_loop(
         label=LABEL,
-        generate=lambda: generate(article_text),
-        evaluate=lambda script: evaluate(article_text, script),
+        generate=lambda: generate(article_text, mention_article),
+        evaluate=lambda script: evaluate(article_text, script, mention_article),
         revise=lambda script, feedback: revise(article_text, script, feedback),
     )
