@@ -46,12 +46,21 @@ GENERATE_SYSTEM = """あなたはYouTubeサムネイルの企画担当です。
 """
 
 
-def generate(script: str) -> dict:
-    """台本からサムネイル用の文言と図解材料(visual_summary)を生成する。"""
-    user = (
-        f"# 動画台本\n\n{script}\n\n"
-        "上記からサムネイル用の文言と図解材料(visual_summary)を作成してください。"
-    )
+def generate(script: str, video_title: str | None = None) -> dict:
+    """台本からサムネイル用の文言と図解材料(visual_summary)を生成する。
+
+    video_title: 指定すると、その動画のYouTubeタイトルと矛盾しない・
+    むしろ補強し合う文言になるよう指示する(未指定の場合は台本のみから生成)。
+    """
+    user = f"# 動画台本\n\n{script}\n\n"
+    if video_title:
+        user += (
+            f"# この動画のYouTubeタイトル\n\n{video_title}\n\n"
+            "上記のタイトルと矛盾しない文言にしてください。タイトルの丸写しでは"
+            "なく、タイトルだけでは伝えきれていない驚きの数字やキーワードを"
+            "補強する形が望ましいです。\n\n"
+        )
+    user += "上記からサムネイル用の文言と図解材料(visual_summary)を作成してください。"
     result = call_json(GENERATE_SYSTEM, user, model=MODEL_GENERATE)
     return {
         "main_text": result.get("main_text", ""),

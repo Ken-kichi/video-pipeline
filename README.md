@@ -104,11 +104,18 @@ flowchart TD
     Integration -->|90点未満なら該当箇所を修正| Script
     Integration -->|90点未満なら該当箇所を修正| Slides
     Integration -->|90点未満なら該当箇所を修正| Voicevox
-    Integration -->|90点以上| Description["概要欄エージェント<br/>(生成→評価→修正)"]
+    Integration -->|90点以上| Title["タイトルエージェント<br/>(--title未指定時のみ、単発生成)"]
+    Title --> Description["概要欄エージェント<br/>(生成→評価→修正)"]
 ```
 
 台本エージェントは、冒頭0:00〜1:00を単体でショート動画としても成立する
 「概要・メリット訴求パート」、残り約9分を詳細解説パートという構成で生成する。
+
+タイトルエージェントは`--title`省略時のみ動作し、確定した台本(整合性チェック後の
+最終版)からCTR向上を狙った短いフックの効いたタイトルを1つ生成する
+（記事の見出し1をそのまま使うのではなく、「なぜあなたのAI開発は失敗するのか？」
+のように視聴者の課題に直接語りかける文言にする）。生成に失敗した場合は
+記事の見出し1、それも無ければ「解説動画」にフォールバックする。
 
 ## 実行方法
 
@@ -132,8 +139,9 @@ uv run video-pipeline --input articles/sample.md --title "機械学習ってな�
 uv run video-pipeline
 ```
 
-`--title` を省略した場合、記事の見出し1（`# 〜`で始まる行）を自動でタイトルに使う。
-見出し1が記事に無ければ「解説動画」になる。
+`--title` を省略した場合、タイトルエージェントがCTR向上を狙った短いフックの
+効いたタイトルを台本から自動生成する（記事の見出し1をそのまま使うのではない。
+生成に失敗した場合のみ記事の見出し1、それも無ければ「解説動画」にフォールバック）。
 
 `--mention-article` / `--no-mention-article` で、概要欄に元記事を紹介するかどうかを
 切り替えられる（未指定なら対話的に選べる。デフォルトは紹介する＝有効。環境変数
@@ -407,6 +415,7 @@ video_pipeline/
     ├── integration_agent.py   # 3つの横断的な整合性チェック
     └── description_agent.py   # YouTube概要欄（概要文・目次・使用技術・リンク・タグ）の生成・評価・修正
                                 # +VOICEVOX/立ち絵クレジット欄を決定的に付け足す
+    ├── title_agent.py          # YouTubeタイトルの生成(単発呼び出し、--title未指定時のみ)
     └── thumbnail_agent.py      # サムネイル用キャッチコピー(main_text/sub_text)の生成(単発呼び出し)
     └── shorts_agent.py         # ショート用フック文言(hook_text/follow_text)の生成(単発呼び出し)
 ```
@@ -473,8 +482,9 @@ Gemini APIの呼び出し回数・コストが動画1本あたりスライド枚
 ## 概要欄のクレジット表記について
 
 `description.txt`の先頭には「【YouTubeタイトル】」として、動画のタイトル
-（`--title`で指定した値、未指定なら記事の見出し1）が決定的に（LLMに書かせず）
-付け足される。アップロード時に、そのままYouTubeのタイトル欄にコピーできる。
+（`--title`で指定した値、未指定ならタイトルエージェントが生成した値）が
+決定的に（LLMに書かせず）付け足される。アップロード時に、そのままYouTubeの
+タイトル欄にコピーできる。
 
 VOICEVOXの音声を使う場合、利用規約で決まった表記（「VOICEVOX:キャラ名」）を
 概要欄に入れる必要がある。`description_agent.build_credits_block()`が
@@ -505,6 +515,11 @@ uv run generate-thumbnail
 - `thumbnail_agent.py`が台本から3つを1回だけ生成する: キャッチコピー
   (main_text/sub_text)に加えて、`visual_summary`（動画の核心的な内容を
   2〜3文で要約したもの。対比構造や具体的な数値を含む）
+- 同じ実行結果ディレクトリに`description.txt`があれば、そこに書かれた
+  YouTubeタイトル（タイトルエージェントが生成した値、または`--title`で
+  指定した値）を読み取り、サムネイルの文言と矛盾しない・補強し合う内容に
+  なるようthumbnail_agentに渡す（タイトルの丸写しにはしない。サムネイルに
+  載せられる文字数はタイトルよりずっと少ないため）
 - 画像生成は2段階のフォールバック構成:
   1. **推奨**: `GEMINI_API_KEY`が使えれば、Geminiに背景・イラスト・文字を
      丸ごと生成させる（`thumbnail_generator.generate_thumbnail_with_gemini`）。

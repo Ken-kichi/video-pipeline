@@ -22,17 +22,17 @@ from video_pipeline.pipeline import run_pipeline
 
 
 def _resolve_title(cli_title: str | None) -> str | None:
-    """--titleが未指定なら、自動検出か手入力かを対話的に選ばせる。"""
+    """--titleが未指定なら、AI生成か手入力かを対話的に選ばせる。"""
     if cli_title is not None:
         return cli_title
     choice = select_from_list(
-        ["記事の見出し1を自動で使う", "自分でタイトルを入力する"],
-        "スライドのタイトルはどうしますか？",
+        ["AIにキャッチーなタイトルを考えてもらう", "自分でタイトルを入力する"],
+        "動画のYouTubeタイトル（スライド表紙にも使う）はどうしますか？",
     )
     if choice == "自分でタイトルを入力する":
         return text_input("タイトルを入力してください:")
     return (
-        None  # 自動検出(pipeline側の既定動作)。非対話環境でもこのフォールバックになる
+        None  # AI生成(pipeline側の既定動作)。非対話環境でもこのフォールバックになる
     )
 
 

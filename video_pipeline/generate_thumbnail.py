@@ -27,6 +27,7 @@ from video_pipeline.agents import thumbnail_agent
 from video_pipeline.config import GENERATE_SLIDE_IMAGES
 from video_pipeline.image_generator import generate_slide_background
 from video_pipeline.interactive import confirm, pick_output_run
+from video_pipeline.io_utils import extract_youtube_title
 from video_pipeline.thumbnail_generator import (
     build_thumbnail,
     generate_thumbnail_with_gemini,
@@ -91,8 +92,15 @@ def main() -> None:
 
     script_text = script_path.read_text(encoding="utf-8")
 
+    video_title = None
+    description_path = script_path.parent / "description.txt"
+    if description_path.exists():
+        video_title = extract_youtube_title(description_path.read_text(encoding="utf-8"))
+        if video_title:
+            print(f"  同じ実行結果のYouTubeタイトルと整合させます: 「{video_title}」")
+
     print("=== サムネイル用キャッチコピーを生成中 ===")
-    thumbnail_copy = thumbnail_agent.generate(script_text)
+    thumbnail_copy = thumbnail_agent.generate(script_text, video_title)
     print(f"  main_text: {thumbnail_copy['main_text']}")
     print(f"  sub_text : {thumbnail_copy['sub_text']}")
     print(f"  visual_summary: {thumbnail_copy['visual_summary']}")

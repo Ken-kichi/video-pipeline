@@ -29,6 +29,7 @@ from video_pipeline.agents import (
     integration_agent,
     script_agent,
     slides_agent,
+    title_agent,
     voicevox_agent,
 )
 from video_pipeline.article_assets import extract_article_assets, summarize_for_prompt
@@ -204,10 +205,6 @@ def run_pipeline(
     )
     mention_article = MENTION_ARTICLE if mention_article is None else mention_article
 
-    if video_title is None:
-        video_title = extract_h1_title(article_text) or DEFAULT_VIDEO_TITLE
-        print(f"タイトル未指定のため記事の見出し1から自動設定: 「{video_title}」")
-
     codes, diagrams = extract_article_assets(article_text)
     asset_summary = summarize_for_prompt(codes, diagrams)
     if codes or diagrams:
@@ -228,6 +225,15 @@ def run_pipeline(
     script, slides, voicevox_text, integration_score, integration_history = (
         _run_integration_loop(article_text, script, slides, voicevox_text)
     )
+
+    if video_title is None:
+        print("=== タイトルエージェント ===")
+        video_title = (
+            title_agent.generate(script)
+            or extract_h1_title(article_text)
+            or DEFAULT_VIDEO_TITLE
+        )
+        print(f"タイトル未指定のためAIが生成: 「{video_title}」")
 
     print("=== 概要欄エージェント ===")
     description, description_score, _ = description_agent.run(
