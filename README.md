@@ -99,7 +99,7 @@ flowchart TD
     Script --> Slides["スライドエージェント<br/>(生成→評価→修正)"]
     Script --> Voicevox["VOICEVOXテキストエージェント<br/>(生成→評価→修正)"]
     Script --> Integration
-    Slides --> Integration["総合エージェント<br/>3つの整合性を採点"]
+    Slides --> Integration["総合エージェント<br/>3つの整合性を採点(GEMINI_API_KEYがあればGeminiとクロスチェック)"]
     Voicevox --> Integration
     Integration -->|スコア未達 or issuesあり: 該当箇所を修正| Script
     Integration -->|スコア未達 or issuesあり: 該当箇所を修正| Slides
@@ -118,6 +118,17 @@ flowchart TD
 台本に無い「Pro・Max・Teamプランが対象」という記述がスライドにだけ
 出典不明のまま追加されている、といった実際の指摘）がそのまま素通りして
 成果物に残ってしまっていた**）。
+
+ただしissuesを1件でも継続条件にすると、些末な・誤検知気味の指摘のためだけに
+毎回`MAX_REVISION_LOOPS`回ループしてしまうケースがあった。これを緩和するため、
+`GEMINI_API_KEY`が設定されていれば、Claudeに加えてGeminiにも同じ観点
+(`integration_agent.CHECK_SYSTEM`)で独立にチェックさせ、**両方のAIが一致して
+指摘した問題だけ**をissues（＝修正ループのトリガー）として扱う。片方のAIしか
+指摘しなかった問題は`single_source_issues`として実行ログに参考表示されるが、
+ループの継続条件には使わない（実データでの検証では、Claude・Geminiとも
+話者入れ替えや数値の食い違いといった実質的な不整合は一致して検出できたため、
+一致判定を通っても見落としのリスクは増えていない）。`GEMINI_API_KEY`未設定時や
+Gemini呼び出し失敗時は、従来通りClaude単独のチェックにフォールバックする。
 
 タイトル・サムネイルのキャッチコピー生成では、短く圧縮する過程で
 数値の主語（「誰の/何についての数値か」）が欠落し、意味が逆転して
@@ -450,6 +461,8 @@ video_pipeline/
 - `MODEL_EVALUATE`（環境変数 `CLAUDE_MODEL_EVALUATE`）: 評価・整合性チェック。デフォルト `claude-sonnet-5`
   （品質を優先するなら `claude-opus-4-8` に変更。コストは約2.5倍になる）
 - `MODEL_EXTRACT`（環境変数 `CLAUDE_MODEL_EXTRACT`）: VOICEVOXテキストの機械的な抽出。デフォルト `claude-haiku-4-5-20251001`
+- `MODEL_EVALUATE_GEMINI`（環境変数 `GEMINI_MODEL_EVALUATE`）: 総合エージェントのクロスチェックに使うGeminiモデル。
+  デフォルト `gemini-3.1-pro-preview`（`GEMINI_API_KEY`が未設定の場合はそもそも使われない）
 - `MAX_REVISION_LOOPS`: 各エージェント（総合エージェントを含む）の生成→評価→修正ループの最大回数（デフォルト3。
   減らすとコストも下がるが、品質基準に届く前にループが打ち切られやすくなる）
 - `SCORE_THRESHOLD`: この点数(0-100)以上で合格とみなす。総合エージェントの整合性スコアにも適用される（デフォルト80。

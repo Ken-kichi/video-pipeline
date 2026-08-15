@@ -7,7 +7,11 @@
   3. VOICEVOXテキストエージェント: 台本 -> 読み上げ用テキスト（生成→評価→修正ループ）
   4. 総合エージェント: 3つの整合性を採点し、スコアがSCORE_THRESHOLD未満か
      issuesが1件でも残っていれば該当箇所を修正して再採点する
-     （MAX_REVISION_LOOPSに達したら最高スコア案を採用）
+     （MAX_REVISION_LOOPSに達したら最高スコア案を採用）。GEMINI_API_KEYが
+     設定されている場合、Claudeに加えてGeminiにも同じ観点で独立にチェック
+     させ、両方のAIが一致して指摘した問題だけをissuesとして扱う（片方のみの
+     指摘は参考表示に留め、修正ループのトリガーにしない。単一モデルの
+     気まぐれな指摘のためだけに毎回ループが回ってしまうのを防ぐため）
   5. 概要欄エージェント: 確定した台本 -> 概要文・目次・元記事リンク・ハッシュタグ
      （生成→評価→修正ループ）
   6. (任意) background_promptが設定されているスライドについて、Gemini(Nano Banana系)で
@@ -73,6 +77,8 @@ def _run_integration_loop(
         print(f"  [{integration_agent.LABEL}] {attempt}回目の整合性スコア: {score}点")
         for issue in issues:
             print(f"   - {issue}")
+        for issue in result.get("single_source_issues", []):
+            print(f"   - (参考/片方のAIのみ検出。修正ループの判定には使わない) {issue}")
 
         if score > best_score:
             best_score = score

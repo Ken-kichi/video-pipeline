@@ -15,6 +15,14 @@ MODEL_GENERATE = os.environ.get("CLAUDE_MODEL_GENERATE", "claude-sonnet-5")
 MODEL_EVALUATE = os.environ.get("CLAUDE_MODEL_EVALUATE", "claude-sonnet-5")
 MODEL_EXTRACT = os.environ.get("CLAUDE_MODEL_EXTRACT", "claude-haiku-4-5-20251001")
 
+# 総合エージェントのクロスチェックに使うGemini側の評価モデル。Claudeとは別会社の
+# モデルに同じ観点でチェックさせ、単一モデルが見落としがちな不整合を拾う狙い。
+# GEMINI_API_KEYが未設定の場合、総合エージェントはこのモデルを使わずClaude単独の
+# チェックにフォールバックする
+MODEL_EVALUATE_GEMINI = os.environ.get(
+    "GEMINI_MODEL_EVALUATE", "gemini-3.1-pro-preview"
+)
+
 # 生成→評価→修正ループの最大試行回数（ai-dev-agent構想と同じく上限3回）
 MAX_REVISION_LOOPS = 3
 
