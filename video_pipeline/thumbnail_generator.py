@@ -23,6 +23,7 @@ _FONT_PATH = Path(__file__).parent / "assets" / "fonts" / "NotoSansJP-Bold.otf"
 CHARACTER_ASSETS_DIR = Path(__file__).parent / "assets" / "characters"
 CHARACTER_PREFIXES = {"つむぎ": "tsumugi", "ずんだもん": "zundamon"}
 CHARACTER_POSITIONS = {"つむぎ": "left", "ずんだもん": "right"}
+CHARACTER_EN_NAMES = {"つむぎ": "Tsumugi", "ずんだもん": "Zundamon"}
 # 上部に固定するテキストと重ならないよう、キャラクターの高さは控えめにする
 CHARACTER_DISPLAY_HEIGHT = 420
 CHARACTER_MARGIN_X = 10
@@ -59,9 +60,10 @@ GEMINI_THUMBNAIL_STYLE = (
     "and ultra-legible, filling a large portion of the frame, with strong "
     "outline/contrast so it reads instantly even at a tiny preview size. "
     "You may add at most ONE simple, bold supporting visual that reinforces "
-    "the headline's meaning — this can be a single striking photo/portrait-"
-    "style visual (e.g. a reacting face), a single illustrated character, or "
-    "one simple icon/symbol/before-after visual. Do NOT create multiple "
+    "the headline's meaning — this should be the show's mascot character(s) "
+    "when reference image(s) are provided (see instructions below), or "
+    "otherwise one simple icon/symbol/before-after visual. Do not depict any "
+    "other human face or invented character. Do NOT create multiple "
     "side-by-side panels, comparison boxes, flowcharts, or diagrams with "
     "several small labels — that reads as a slide, not a thumbnail, and "
     "becomes illegible at small preview sizes. Do not add any supporting "
@@ -127,8 +129,25 @@ def _cover_resize_crop(
     return resized.crop((left, top, left + target_width, top + target_height))
 
 
+def _character_reference_instruction(speakers: list[str]) -> str:
+    """参照画像として渡すキャラクター立ち絵をどう扱うべきかの指示文を作る。"""
+    names = " and ".join(CHARACTER_EN_NAMES.get(s, s) for s in speakers)
+    return (
+        f"The attached reference image(s) show this show's mascot character(s), "
+        f"{names} — use them as the thumbnail's supporting visual. Keep their "
+        f"exact design, colors, and line-art style faithful to the reference "
+        f"image(s); do not redesign, reinterpret, or replace them with a "
+        f"different character or a human face. Place them at the bottom of the "
+        f"frame reacting expressively to the headline, positioned so they do "
+        f"not overlap or cover the headline text."
+    )
+
+
 def build_gemini_thumbnail_prompt(
-    main_text: str, sub_text: str, visual_summary: str = ""
+    main_text: str,
+    sub_text: str,
+    visual_summary: str = "",
+    character_speakers: list[str] | None = None,
 ) -> str:
     """Geminiにサムネイルを丸ごと生成させるためのプロンプトを組み立てる。
 
@@ -139,6 +158,10 @@ def build_gemini_thumbnail_prompt(
     しまった(実際に生成された画像で確認された)。visual_summaryは「複数の
     パネルを作る材料」ではなく「たった1つの視覚要素を選ぶための参考情報」
     として使うよう明示している。
+
+    character_speakers: 参照画像として一緒に渡すキャラクター(つむぎ/ずんだもん)
+    の話者名リスト。指定すると、汎用的な人物の顔などではなく、この立ち絵を
+    忠実に使うようGeminiに指示する。
     """
     lines = [
         "Design a YouTube video thumbnail image.",
@@ -159,6 +182,8 @@ def build_gemini_thumbnail_prompt(
         "Do not add any other text, watermarks, or logos beyond what is described below."
     )
     lines.append(GEMINI_THUMBNAIL_STYLE)
+    if character_speakers:
+        lines.append(_character_reference_instruction(character_speakers))
     return " ".join(lines)
 
 
@@ -174,12 +199,19 @@ def generate_thumbnail_with_gemini(
     from video_pipeline.image_generator import generate_slide_image
 
     output_path = Path(output_path)
-    prompt = build_gemini_thumbnail_prompt(main_text, sub_text, visual_summary)
+    character_assets = _character_asset_paths()
+    prompt = build_gemini_thumbnail_prompt(
+        main_text,
+        sub_text,
+        visual_summary,
+        character_speakers=list(character_assets.keys()),
+    )
     raw_path = generate_slide_image(
         prompt,
         output_path.parent / "_thumbnail_gemini_raw.png",
         aspect_ratio="16:9",
         model=GEMINI_THUMBNAIL_MODEL,
+        reference_images=list(character_assets.values()) or None,
     )
     if raw_path is None:
         return None

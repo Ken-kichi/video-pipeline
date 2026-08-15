@@ -29,6 +29,7 @@ def generate_slide_image(
     output_path: str | Path,
     aspect_ratio: str = "16:9",
     model: str | None = None,
+    reference_images: list[Path] | None = None,
 ) -> Path | None:
     """promptから画像を生成しoutput_pathに保存する。生成できなければNoneを返す。
 
@@ -39,6 +40,11 @@ def generate_slide_image(
     modelを指定しない場合はconfig.GEMINI_IMAGE_MODELを使う。サムネイルの
     ように画像内に正確な文字を焼き込みたい用途では、文字精度の高い
     (代わりに高価な)モデルを個別に指定できるようにしている。
+
+    reference_imagesを渡すと、それらの画像をpromptより先にcontentsへ含めて
+    渡す(image-to-image)。Nano Banana系モデルはこれを見て、キャラクターの
+    見た目を保ったまま新しい構図に描き直せる(キャラクターの一貫性を保つ
+    ための機能)。
     """
     api_key = os.environ.get("GEMINI_API_KEY")
     if not api_key:
@@ -56,9 +62,14 @@ def generate_slide_image(
 
     try:
         client = genai.Client(api_key=api_key)
+        contents: list = [
+            types.Part.from_bytes(data=Path(ref).read_bytes(), mime_type="image/png")
+            for ref in reference_images or []
+        ]
+        contents.append(prompt)
         response = client.models.generate_content(
             model=model or GEMINI_IMAGE_MODEL,
-            contents=[prompt],
+            contents=contents,
             config=types.GenerateContentConfig(
                 response_modalities=["Text", "Image"],
                 image_config=types.ImageConfig(aspect_ratio=aspect_ratio),
