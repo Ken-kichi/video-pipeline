@@ -6,7 +6,10 @@
   1. 完成動画(final_video.mp4)の冒頭付近(デフォルト60秒。script_agentが
      台本の0:00〜1:00を「単体でショートとして成立する概要パート」として
      生成する設計になっているため、これに合わせている)を切り出す。
-     指定秒数ぴったりで切ると、セリフの途中で途切れてしまう不具合が
+     create_shorts.pyのデフォルトでは、台本の見出しから概要パート最後の
+     シーン番号を自動検出し、scene_boundaries.jsonがあればそのシーンの
+     正確な終了時刻を使う。scene_boundaries.jsonが無い場合はdurationを
+     目安秒数として使うが、指定秒数ぴったりで切ると、セリフの途中で途切れてしまう不具合が
      実際に発生したため、指定秒数付近の無音区間(セリフの間)を検出し、
      そこに合わせて実際の切り出し秒数を調整する。ただし先頭のタイトル/
      サムネイル静止区間(TITLE_SLIDE_DURATION_SECONDS)はスキップし、
@@ -121,18 +124,19 @@ def read_scene_end_time(
     return None
 
 
+_OVERVIEW_SCENE_HEADING_RE = re.compile(r"^### シーン(\d+)[：:].*概要パート", re.MULTILINE)
+
+
 def find_overview_end_scene(script_text: str) -> int:
     """台本から「概要パート」最後のシーン番号を求める。
 
     script_agentの設計上、概要パート(0:00〜1:00)は単体でショートとして
-    成立するように4〜6個の短いシーンに分割され、区切りの`---`行を挟んで
-    詳細解説パートへ続く。以前は「シーン1の終わり」を決め打ちで切り出して
-    いたが、この分割ルール導入後はシーン1だけでは概要パートの途中(結論を
-    言う前)で切れてしまうため、`---`より前にある最後のシーン番号を都度読む。
-    区切りが見つからない場合(概要パートが1シーンのみの旧形式など)は1を返す。
+    成立するように8〜10個程度の短いシーンに分割され、各シーンの見出しに
+    「概要パート」という文言が入る(例:「### シーン3：概要パート（0:14〜0:21）」)。
+    この文言を含む見出しのうち、最後のシーン番号を返す。見出しが見つからない
+    場合(古い形式の台本など)は1を返す。
     """
-    overview_text = re.split(r"(?m)^---\s*$", script_text, maxsplit=1)[0]
-    scene_numbers = [int(m) for m in re.findall(r"(?m)^### シーン(\d+)", overview_text)]
+    scene_numbers = [int(m) for m in _OVERVIEW_SCENE_HEADING_RE.findall(script_text)]
     return max(scene_numbers) if scene_numbers else 1
 
 
