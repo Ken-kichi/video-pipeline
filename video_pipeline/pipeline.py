@@ -5,8 +5,9 @@
   2. スライドエージェント: 記事+台本 -> スライド内容（生成→評価→修正ループ）
      ※各スライドには任意でbackground_prompt（背景用、文字・数値は描かせない）が付く
   3. VOICEVOXテキストエージェント: 台本 -> 読み上げ用テキスト（生成→評価→修正ループ）
-  4. 総合エージェント: 3つの整合性を採点し、90点未満なら該当箇所を修正して再採点
-     （他の3エージェントと同じくSCORE_THRESHOLD/MAX_REVISION_LOOPSに従う）
+  4. 総合エージェント: 3つの整合性を採点し、スコアがSCORE_THRESHOLD未満か
+     issuesが1件でも残っていれば該当箇所を修正して再採点する
+     （MAX_REVISION_LOOPSに達したら最高スコア案を採用）
   5. 概要欄エージェント: 確定した台本 -> 概要文・目次・元記事リンク・ハッシュタグ
      （生成→評価→修正ループ）
   6. (任意) background_promptが設定されているスライドについて、Gemini(Nano Banana系)で
@@ -77,7 +78,7 @@ def _run_integration_loop(
             best_score = score
             best = (script, slides, voicevox_text)
 
-        if score >= SCORE_THRESHOLD:
+        if score >= SCORE_THRESHOLD and not issues:
             break
         if attempt == MAX_REVISION_LOOPS:
             print(
