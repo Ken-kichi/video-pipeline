@@ -108,11 +108,16 @@ def _prepare_synthesis_text(text: str) -> str:
     return cleaned
 
 
-def synthesize(text: str, speaker_id: int, base_url: str = DEFAULT_BASE_URL) -> bytes:
-    """1行分のテキストをWAV音声(bytes)に変換する。
+def synthesize_with_query(
+    text: str, speaker_id: int, base_url: str = DEFAULT_BASE_URL
+) -> tuple[bytes, dict]:
+    """1行分のテキストをWAV音声(bytes)と、合成に使ったaudio_query(JSON)のペアに変換する。
 
     textには字幕用の元の表記(「（笑）」や「空の箱」等)がそのまま渡ってきて構わない。
     音声合成にだけ影響する整形(_prepare_synthesis_text)をここで適用する。
+
+    audio_queryにはモーラ(音節)ごとの子音長・母音長が含まれており、
+    mouth_open_intervals_from_query()で口パクのタイミング計算にそのまま使える。
     """
     synthesis_text = _prepare_synthesis_text(text)
     query_response = requests.post(
@@ -121,16 +126,66 @@ def synthesize(text: str, speaker_id: int, base_url: str = DEFAULT_BASE_URL) -> 
         timeout=30,
     )
     query_response.raise_for_status()
+    query = query_response.json()
 
     synthesis_response = requests.post(
         f"{base_url}/synthesis",
         params={"speaker": speaker_id},
         headers={"Content-Type": "application/json"},
-        data=json.dumps(query_response.json()),
+        data=json.dumps(query),
         timeout=60,
     )
     synthesis_response.raise_for_status()
-    return synthesis_response.content
+    return synthesis_response.content, query
+
+
+def synthesize(text: str, speaker_id: int, base_url: str = DEFAULT_BASE_URL) -> bytes:
+    """1行分のテキストをWAV音声(bytes)に変換する。"""
+    wav_bytes, _query = synthesize_with_query(text, speaker_id, base_url)
+    return wav_bytes
+
+
+# 子音区間はこの秒数以下なら前後の母音区間と連結し、口を閉じずに繋げる。
+# 実測で子音長は概ね0.03〜0.11秒程度なのに対し、読点等の実際の間(pause_mora)は
+# 0.3秒前後あるため、この閾値で「単語内の細かい子音」と「本当の間」を区別できる。
+DEFAULT_MOUTH_MERGE_GAP_SECONDS = 0.15
+
+
+def mouth_open_intervals_from_query(
+    query: dict, merge_gap_seconds: float = DEFAULT_MOUTH_MERGE_GAP_SECONDS
+) -> list[tuple[float, float]]:
+    """audio_queryのモーラ長から、口を開けておく区間(音声ファイル先頭からの相対秒)を作る。
+
+    母音を発音している区間だけを素直に「開」とすると、モーラ(音節)ごとに
+    数十msで開閉が切り替わってしまい、チラつくだけで自然な口パクに見えない。
+    ここでは母音区間をまず求めた上で、子音1つ分程度の短い隙間
+    (merge_gap_seconds以下)は連結し、読点等の実際の間だけ口が閉じるようにする。
+    """
+    raw_intervals: list[tuple[float, float]] = []
+    cursor = query.get("prePhonemeLength") or 0.0
+
+    for phrase in query.get("accent_phrases", []):
+        for mora in phrase.get("moras", []):
+            cursor += mora.get("consonant_length") or 0.0
+            vowel_length = mora.get("vowel_length") or 0.0
+            if vowel_length > 0:
+                raw_intervals.append((cursor, cursor + vowel_length))
+            cursor += vowel_length
+        pause_mora = phrase.get("pause_mora")
+        if pause_mora:
+            cursor += pause_mora.get("vowel_length") or 0.0
+
+    if not raw_intervals:
+        return []
+
+    merged = [raw_intervals[0]]
+    for start, end in raw_intervals[1:]:
+        last_start, last_end = merged[-1]
+        if start - last_end <= merge_gap_seconds:
+            merged[-1] = (last_start, end)
+        else:
+            merged.append((start, end))
+    return merged
 
 
 def parse_voicevox_script(

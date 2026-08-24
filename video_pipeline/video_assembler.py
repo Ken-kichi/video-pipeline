@@ -36,7 +36,7 @@ import hashlib
 import json
 import subprocess
 import wave
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont
@@ -47,8 +47,9 @@ from video_pipeline.voicevox_client import (
     DEFAULT_BASE_URL,
     DEFAULT_STYLE_NAME,
     list_speakers,
+    mouth_open_intervals_from_query,
     resolve_speaker_id,
-    synthesize,
+    synthesize_with_query,
 )
 
 FONTS_DIR = Path(__file__).parent / "assets" / "fonts"
@@ -116,6 +117,10 @@ class TimedLine:
     start: float
     end: float
     audio_path: Path
+    # 発話区間内で「口を開けておく」べき絶対時刻(秒)の区間リスト。
+    # VOICEVOXのモーラ長から計算する(voicevox_client.mouth_open_intervals_from_query)。
+    # 空の場合は呼び出し側でstart〜end全体を開けっぱなしにフォールバックする。
+    mouth_open_intervals: list[tuple[float, float]] = field(default_factory=list)
 
 
 def _wav_duration_seconds(path: Path) -> float:
@@ -261,25 +266,35 @@ def synthesize_timeline(
             f"{speaker_id}:{line.text}".encode("utf-8")
         ).hexdigest()[:16]
         cached_path = cache_dir / f"{cache_key}.wav"
+        cached_query_path = cache_dir / f"{cache_key}.json"
         audio_path = work_dir / f"line_{index:04d}.wav"
 
-        if cached_path.exists():
+        if cached_path.exists() and cached_query_path.exists():
             print(
                 f"  {index:03d}: [シーン{line.scene_number}/{line.speaker}] {line.text[:30]}... (キャッシュ利用)"
             )
             audio_path.write_bytes(cached_path.read_bytes())
+            query = json.loads(cached_query_path.read_text(encoding="utf-8"))
         else:
             print(
                 f"  {index:03d}: [シーン{line.scene_number}/{line.speaker}] {line.text[:30]}..."
             )
-            wav_bytes = synthesize(line.text, speaker_id, base_url)
+            wav_bytes, query = synthesize_with_query(line.text, speaker_id, base_url)
             cached_path.write_bytes(wav_bytes)
+            cached_query_path.write_text(
+                json.dumps(query, ensure_ascii=False), encoding="utf-8"
+            )
             audio_path.write_bytes(wav_bytes)
 
         if reference_audio_path is None:
             reference_audio_path = audio_path
 
         duration = _wav_duration_seconds(audio_path)
+        local_mouth_intervals = mouth_open_intervals_from_query(query)
+        mouth_open_intervals = [
+            (cursor + start, min(cursor + end, cursor + duration))
+            for start, end in local_mouth_intervals
+        ]
         timeline.append(
             TimedLine(
                 speaker=line.speaker,
@@ -288,6 +303,7 @@ def synthesize_timeline(
                 start=cursor,
                 end=cursor + duration,
                 audio_path=audio_path,
+                mouth_open_intervals=mouth_open_intervals,
             )
         )
         audio_segments.append(audio_path)
@@ -489,7 +505,15 @@ def _write_shorts_data(
         )
 
     speaker_timeline = [
-        {"speaker": item.speaker, "start": round(item.start, 3), "end": round(item.end, 3)}
+        {
+            "speaker": item.speaker,
+            "start": round(item.start, 3),
+            "end": round(item.end, 3),
+            "mouth_open_intervals": [
+                [round(start, 3), round(end, 3)]
+                for start, end in item.mouth_open_intervals
+            ],
+        }
         for item in timeline
     ]
 
@@ -838,7 +862,12 @@ def assemble_video(
         )
         y_expr = "main_h-overlay_h"
         intervals = [
-            (item.start, item.end) for item in timeline if item.speaker == speaker
+            interval
+            for item in timeline
+            if item.speaker == speaker
+            # モーラ情報から区間を作れなかった行(空リスト)は、発話区間全体を
+            # 開けっぱなしにフォールバックする(口パク無しよりはこちらの方が自然)
+            for interval in (item.mouth_open_intervals or [(item.start, item.end)])
         ]
         enable_expr = build_enable_expr(intervals)
 

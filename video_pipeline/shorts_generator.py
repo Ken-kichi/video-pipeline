@@ -551,9 +551,20 @@ def _build_character_video(
     for speaker, start, end in display_segments:
         display_intervals.setdefault(speaker, []).append((start, end))
 
+    # 口パクは行全体ではなく、モーラ単位で計算済みの開閉区間(本編と同じもの)を
+    # 個別に切り出し・速度変換して使う。古いshorts_data.json(この項目が無い)や
+    # 区間が空の行は、発話区間全体を開けっぱなしにフォールバックする。
     talk_intervals: dict[str, list[tuple[float, float]]] = {}
-    for speaker, start, end in rebased_lines:
-        talk_intervals.setdefault(speaker, []).append((start, end))
+    for item in speaker_timeline:
+        speaker = item["speaker"]
+        mouth_open_intervals = item.get("mouth_open_intervals") or [
+            (item["start"], item["end"])
+        ]
+        for start, end in mouth_open_intervals:
+            rebased = _rebase_interval(start, end, window_start, window_end, speed)
+            if rebased is None:
+                continue
+            talk_intervals.setdefault(speaker, []).append(rebased)
 
     x_expr = "(main_w-overlay_w)/2"
     y_expr = "main_h-overlay_h"
