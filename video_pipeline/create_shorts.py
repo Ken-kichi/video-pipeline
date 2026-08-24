@@ -19,6 +19,12 @@ scene_boundaries.jsonがある場合は必ずそちらが優先される。
 呼び出すエージェントはshorts_agentのみ(単発のClaude API呼び出し1回。
 サムネイル用とは別に、ショートに適したより強いフック文言を考える)。
 
+縦長キャンバスは上段=フック文言/中段=スライド見出し・箇条書きの拡大表示/
+下段=つむぎ・ずんだもんの立ち絵(本編と同じ口パク)の3段構成にする
+(shorts_generator.py参照)。中段・下段の再構成にはrender-videoが書き出す
+shorts_data.jsonが必要なため、古いバージョンで生成した動画はショート化
+できない(render-videoを再実行してください)。
+
 使い方:
   uv run create-shorts --video output/20260731_153000/final_video.mp4
   uv run create-shorts    # --videoを省略するとoutput/*/から対話的に選べる
@@ -116,19 +122,20 @@ def main() -> None:
 
     print("=== ショート用フック文言を生成中 ===")
     shorts_copy = shorts_agent.generate(script_text)
-    print(f"  hook_text  : {shorts_copy['hook_text']}")
-    print(f"  follow_text: {shorts_copy['follow_text']}")
+    print(f"  hook_text: {shorts_copy['hook_text']}")
 
     print("=== ショート動画を組み立て中 ===")
     try:
         result_path = build_shorts_video(
             source_video_path=video_path,
             output_path=output_path,
-            main_text=shorts_copy["hook_text"],
-            sub_text=shorts_copy["follow_text"],
+            hook_text=shorts_copy["hook_text"],
             duration=args.duration,
             exact_end_time=exact_end_time,
         )
+    except FileNotFoundError as exc:
+        print(f"\n[エラー] {exc}")
+        raise SystemExit(1) from exc
     except Exception as exc:  # noqa: BLE001 CLIとして分かりやすいエラー表示にするため
         print(
             f"\n[エラー] ショート動画の組み立てに失敗しました: {exc}\nffmpegが使える状態か確認してください。"

@@ -43,6 +43,7 @@ from pathlib import Path
 from PIL import Image, ImageDraw, ImageFont
 
 from video_pipeline.script_parser import flatten_lines, parse_script
+from video_pipeline.slide_image_builder import extract_shorts_text
 from video_pipeline.voicevox_client import (
     DEFAULT_BASE_URL,
     DEFAULT_STYLE_NAME,
@@ -126,7 +127,7 @@ def _wav_duration_seconds(path: Path) -> float:
         return frames / float(rate)
 
 
-def _character_asset_paths() -> dict[str, dict[str, Path]]:
+def character_asset_paths() -> dict[str, dict[str, Path]]:
     """assets/characters/に口の開閉2状態(closed/open)が揃っているキャラクターだけ返す。
 
     PSD素材を用意していないユーザー向けに、片方または両方揃っていなければ
@@ -141,7 +142,7 @@ def _character_asset_paths() -> dict[str, dict[str, Path]]:
     return assets
 
 
-def _build_enable_expr(intervals: list[tuple[float, float]]) -> str:
+def build_enable_expr(intervals: list[tuple[float, float]]) -> str:
     """between(t,s,e)の和で、ffmpegのenableオプション用の式を作る。
 
     区間が1つも無ければ常に偽("0")を返す。
@@ -460,6 +461,59 @@ def _write_scene_boundaries(timeline: list[TimedLine], output_path: Path) -> Pat
     return output_path
 
 
+def _write_shorts_data(
+    timeline: list[TimedLine], slides_dir: Path, output_path: Path
+) -> Path:
+    """create-shortsが縦長レイアウトを組み立てるための素材をJSONに保存する。
+
+    スライドはPNGとして焼き込んだ時点で文字情報が失われるため、
+    manifest.jsonに残しておいたスライドの元データ(slide_image_builder.py参照)
+    からshorts用の見出し・補足テキストを再構成し、シーンの開始・終了時刻と
+    セットで保存する。あわせて、キャラクター立ち絵の口パクをショート動画側でも
+    再現できるよう、話者ごとの発話区間(本編の口開閉オーバーレイに使ったのと
+    同じタイミング)も保存する。
+    """
+    manifest = _load_slides_manifest(slides_dir)
+    scene_to_datas: dict[int, list[dict]] = {}
+    for entry in manifest:
+        scene_number = entry.get("scene_number")
+        if scene_number is None or "data" not in entry:
+            continue
+        scene_to_datas.setdefault(scene_number, []).append(entry["data"])
+
+    boundaries = _compute_scene_boundaries(timeline)
+    scenes = []
+    for scene_number, (start, end) in sorted(boundaries.items()):
+        datas = scene_to_datas.get(scene_number)
+        # 1シーンに複数スライドが対応する場合も、ショートの短い表示時間では
+        # 1シーン1見出しで十分なため、先頭のスライドのテキストだけを使う
+        heading, sub_lines = extract_shorts_text(datas[0]) if datas else ("", [])
+        scenes.append(
+            {
+                "scene_number": scene_number,
+                "start": round(start, 3),
+                "end": round(end, 3),
+                "heading": heading,
+                "sub_lines": sub_lines,
+            }
+        )
+
+    speaker_timeline = [
+        {"speaker": item.speaker, "start": round(item.start, 3), "end": round(item.end, 3)}
+        for item in timeline
+    ]
+
+    output_path.write_text(
+        json.dumps(
+            {"scenes": scenes, "speaker_timeline": speaker_timeline},
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    return output_path
+
+
 def _build_visual_timeline(
     timeline: list[TimedLine], slides_dir: Path, thumbnail_path: Path | None = None
 ) -> list[tuple[Path, float]]:
@@ -728,6 +782,11 @@ def assemble_video(
     )
     print(f"  シーン境界を保存しました: {scene_boundaries_path}")
 
+    shorts_data_path = _write_shorts_data(
+        timeline, slides_dir, output_path.parent / "shorts_data.json"
+    )
+    print(f"  ショート用データを保存しました: {shorts_data_path}")
+
     print("=== 音声を結合中 ===")
     audio_concat_path = _write_audio_concat_file(
         [str(path.resolve()) for path in audio_segments],
@@ -799,7 +858,7 @@ def assemble_video(
     ass_path_arg = _quote_ffmpeg_filter_value(str(ass_path.resolve()))
     fonts_dir_arg = _quote_ffmpeg_filter_value(str(FONTS_DIR.resolve()))
 
-    character_assets = _character_asset_paths()
+    character_assets = character_asset_paths()
     if character_assets:
         print(f"  立ち絵オーバーレイを合成します: {', '.join(character_assets)}")
 
@@ -821,7 +880,7 @@ def assemble_video(
         intervals = [
             (item.start, item.end) for item in timeline if item.speaker == speaker
         ]
-        enable_expr = _build_enable_expr(intervals)
+        enable_expr = build_enable_expr(intervals)
         # サムネイルを冒頭に使う場合、サムネイル自体に既にキャラクターが
         # 描かれているため、その区間だけ動画側のオーバーレイ(常時表示の
         # 「口を閉じた」状態)を出さないようにして二重表示を避ける

@@ -234,10 +234,6 @@ def _render_bullets(
 ) -> None:
     """タイトル+箇条書き(標準レイアウト)。"""
     title_font = _load_font(56, weight=700)
-    # ショート動画では、この本編スライドが縦長キャンバス中央の高さ約6割の
-    # 帯に縮小されて埋め込まれる(shorts_generator.py)。本編(1920x1080)では
-    # 38pxで問題なくても、その縮小後はスマホ画面上でほぼ読めなくなるため、
-    # 補助テキストは本編の見た目を崩さない範囲で大きめにしておく。
     body_font = _load_font(44, weight=400)
     body_max_width = SLIDE_WIDTH - MARGIN * 2
 
@@ -503,6 +499,31 @@ def build_content_slide(
     return output_path
 
 
+def extract_shorts_text(slide_data: dict) -> tuple[str, list[str]]:
+    """スライドの構造化データから、ショート動画の上半分に大きく出す
+
+    (見出し, 補足行のリスト)を取り出す。レイアウトごとに主役のテキスト
+    フィールドが異なる(bulletsはtitle+bullets、statはstat_value、
+    quoteはquote_textなど)ため、layoutに応じて対応するフィールドを選ぶ。
+    code/diagram(実際のコード・図を貼るレイアウト)は再現しても読めないため、
+    titleだけをそのまま見出しとして使う。
+    """
+    layout = slide_data.get("layout", "bullets")
+    if layout == "stat":
+        heading = slide_data.get("stat_value", "") or slide_data.get("title", "")
+        subs = [s for s in (slide_data.get("title", ""), slide_data.get("stat_label", "")) if s]
+        return heading, subs
+    if layout == "quote":
+        heading = slide_data.get("quote_text", "")
+        context = slide_data.get("quote_context", "")
+        return heading, ([context] if context else [])
+    if layout == "comparison":
+        return slide_data.get("title", ""), []
+    if layout in ("code", "diagram"):
+        return slide_data.get("title", ""), []
+    return slide_data.get("title", ""), list(slide_data.get("bullets", []))
+
+
 def build_slide_images(
     title: str,
     slides: list[dict],
@@ -525,7 +546,14 @@ def build_slide_images(
         background_path=title_background_path,
     )
     paths = [title_path]
-    manifest = [{"file": title_path.name, "scene_number": None, "layout": "title"}]
+    manifest = [
+        {
+            "file": title_path.name,
+            "scene_number": None,
+            "layout": "title",
+            "data": {"title": title},
+        }
+    ]
 
     for i, slide_data in enumerate(slides, start=1):
         path = build_content_slide(slide_data, i, output_dir / f"slide_{i:02d}.png")
@@ -535,6 +563,9 @@ def build_slide_images(
                 "file": path.name,
                 "scene_number": slide_data.get("scene_number"),
                 "layout": slide_data.get("layout", "bullets"),
+                # create-shortsがショート動画用の拡大テキストを再構成する際に使う
+                # (画像として焼き込んだ後は文字情報が失われるため、元データをそのまま残す)
+                "data": slide_data,
             }
         )
 
