@@ -3,10 +3,9 @@
 事前にVOICEVOXアプリを起動しておくこと。ffmpegのインストールも必要
 (Macなら `brew install ffmpeg-full`)。
 
-動画冒頭のタイトル区間は、同じディレクトリに`thumbnail.png`があれば
-自動的にそれを表示する(YouTubeのサムネイルと動画冒頭を一致させるため)。
-無ければ従来通りスライドのタイトル画面を使う。`--no-thumbnail-intro`で
-この挙動を無効化できる。
+動画冒頭のタイトル区間は常にスライドのタイトル画面を使う。YouTubeの
+サムネイルはYouTube側の設定で個別に指定するものなので、動画自体には
+焼き込まない。
 
 BGMは`video_pipeline/assets/bgm/`に置いたファイルから対話的に選べる
 (著作権の都合上、BGMファイル自体は同梱していない。各自で用意する)。
@@ -53,16 +52,6 @@ def main() -> None:
         "--output",
         default=None,
         help="出力する動画ファイルのパス(.mp4、省略時は対話選択したディレクトリ内)",
-    )
-    parser.add_argument(
-        "--thumbnail",
-        default=None,
-        help="動画冒頭に表示するサムネイル画像のパス(省略時は同じディレクトリのthumbnail.pngを自動使用)",
-    )
-    parser.add_argument(
-        "--no-thumbnail-intro",
-        action="store_true",
-        help="サムネイルを動画冒頭に使わず、従来通りスライドのタイトル画面を使う",
     )
     parser.add_argument(
         "--bgm",
@@ -116,18 +105,6 @@ def main() -> None:
     if not slides_dir.exists():
         raise FileNotFoundError(f"スライドディレクトリが見つかりません: {slides_dir}")
 
-    thumbnail_path = None
-    if not args.no_thumbnail_intro:
-        thumbnail_path = (
-            Path(args.thumbnail)
-            if args.thumbnail
-            else script_path.parent / "thumbnail.png"
-        )
-        if not thumbnail_path.exists():
-            thumbnail_path = None
-        else:
-            print(f"動画冒頭にサムネイルを使用します: {thumbnail_path}")
-
     bgm_path = None
     if not args.no_bgm:
         bgm_path = Path(args.bgm) if args.bgm else pick_bgm_file(BGM_DIR)
@@ -143,7 +120,6 @@ def main() -> None:
             output_path=output_path,
             work_dir=args.work_dir,
             base_url=base_url,
-            thumbnail_path=thumbnail_path,
             bgm_path=bgm_path,
             page_turn_sound=not args.no_page_turn_sound,
         )

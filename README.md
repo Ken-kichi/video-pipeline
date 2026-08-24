@@ -63,7 +63,6 @@ flowchart TD
 
     Out --> RV["<b>uv run render-video</b><br/>VOICEVOX ENGINE + ffmpeg"]
     Assets -.あれば自動で使う.-> RV
-    Thumb -.あれば冒頭に使う.-> RV
     RV --> Final["final_video.mp4<br/>(完全自動・字幕/立ち絵つき)"]
 
     Out --> VS["<b>uv run voicevox-synthesize</b><br/>VOICEVOX ENGINEのみ"]
@@ -387,11 +386,6 @@ code/diagramスライド側にも字幕・キャラクター表示分の下部�
 (`slide_image_builder._media_bottom_reserved_space()`。キャラクター素材が
 無い環境では字幕分の余白だけを確保する)を確保するようにした。
 
-`render-video`実行時に動画と同じディレクトリの`thumbnail.png`が使われる場合
-（下記「サムネイル生成」参照）、そのイントロ区間だけは口を閉じた常時オーバーレイを
-出さない（サムネイル自体に既にキャラクターが描かれているため、二重表示になるのを
-防ぐため）。
-
 ## 出力ファイル
 
 | ファイル | 内容 |
@@ -594,17 +588,11 @@ uv run generate-thumbnail
   ずんだもん=右下）でサムネイルにも表示する（Geminiが丸ごと生成する場合は
   実際のキャラクター素材をそのまま使わせることはできないため、含まれない）
 
-生成された`thumbnail.png`は、`render-video`実行時に**動画冒頭のタイトル区間
-（2秒間）にもそのまま使われる**（YouTubeのサムネイルと動画の最初に見える画面を
-一致させるため）。同じディレクトリに`thumbnail.png`があれば自動的に使われ、
-無効にしたい場合は`--no-thumbnail-intro`を付ける、別の画像を使いたい場合は
-`--thumbnail <パス>`で指定する。`generate-thumbnail`を実行していなければ
-（`thumbnail.png`が無ければ）、従来通りスライドのタイトル画面が使われる。
-
-注意点: ffmpegのconcatデマクサーは、先頭の画像だけ動画と異なる解像度だと
-正しく扱えず、その画像が実質無視されてしまう不具合があったため、
-`render-video`側でサムネイルを事前に動画と同じ解像度(1920x1080)に
-リサイズしてから使うようにしている。
+生成された`thumbnail.png`は動画自体には焼き込まない。YouTubeへのアップロード時に、
+YouTube側のサムネイル設定画面で個別にアップロードして指定する
+（以前は`render-video`実行時に動画冒頭のタイトル区間にもそのまま使う機能が
+あったが、サムネイルの指定はYouTube側の設定に一本化する方針にしたため廃止した。
+動画冒頭のタイトル区間は常にスライドのタイトル画面が使われる）。
 
 ## YouTubeショート生成
 
