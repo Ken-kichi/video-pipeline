@@ -6,7 +6,10 @@
     ショート動画でも読めるサイズに拡大して表示する。シーンが切り替わるたびに
     表示内容も切り替わる
   - 下段(BOTTOM_HALF_HEIGHT): つむぎ・ずんだもんの立ち絵を、本編と同じ
-    口開閉オーバーレイ(発話区間に合わせて口が動く)で配置する
+    口開閉オーバーレイ(発話区間に合わせて口が動く)で配置する。本編とは
+    異なり、2人を常時並べると縦長キャンバスでは1人あたりが小さくなり
+    窮屈になるため、その瞬間に喋っている方だけを画面中央に大きく表示する
+    (話者が切り替わるたびに表示するキャラクターも切り替わる)
 
 以前は「完成動画の冒頭をそのまま縮小してセンターに置き、上下の空いた
 スペースに文言を入れる」という構成だったが、実際の16:9映像を縮小すると
@@ -41,8 +44,6 @@ from pathlib import Path
 from PIL import Image, ImageDraw, ImageFont
 
 from video_pipeline.video_assembler import (
-    CHARACTER_MARGIN_X,
-    CHARACTER_POSITIONS,
     CHARACTER_PREFIXES,
     VIDEO_FPS,
     build_enable_expr,
@@ -56,10 +57,9 @@ BOTTOM_HALF_HEIGHT = SHORTS_HEIGHT - TOP_HALF_HEIGHT
 # 上段(フック文言)の高さ。残りをスライド文字エリアに割り当てる。
 HOOK_BAR_HEIGHT = 150
 SLIDE_AREA_HEIGHT = TOP_HALF_HEIGHT - HOOK_BAR_HEIGHT
-# 下段(キャラクター)の表示高さ。立ち絵は縦横比がほぼ1:1(トリミング後)なので、
-# 高さをそのまま使うと2人並べたときに1080px幅に収まらず重なってしまう。
-# 左右マージン(CHARACTER_MARGIN_X)を差し引いても2人が重ならない高さにする。
-CHARACTER_SHORTS_HEIGHT = 480
+# 下段(キャラクター)の表示高さ。常時1人だけを表示するため、下段の高さ
+# いっぱいまで大きく表示できる(立ち絵は縦横比がほぼ1:1、トリミング後)。
+CHARACTER_SHORTS_HEIGHT = 860
 
 DEFAULT_SHORTS_DURATION_SECONDS = 60.0
 # ショート動画だけにかける再生速度倍率(視聴維持率を意識して本編より速く見せる)
@@ -228,20 +228,33 @@ def read_scene_end_time(scene_boundaries_path: str | Path, scene_number: int) ->
     return None
 
 
-_OVERVIEW_SCENE_HEADING_RE = re.compile(r"^### シーン(\d+)[：:].*概要パート", re.MULTILINE)
+_SCENE_HEADING_TIME_RE = re.compile(
+    r"^### シーン(\d+)[：:].*?[\(（](\d+):(\d+)", re.MULTILINE
+)
 
 
 def find_overview_end_scene(script_text: str) -> int:
-    """台本から「概要パート」最後のシーン番号を求める。
+    """台本から「概要パート」(0:00〜1:00)最後のシーン番号を求める。
 
-    script_agentの設計上、概要パート(0:00〜1:00)は単体でショートとして
-    成立するように8〜10個程度の短いシーンに分割され、各シーンの見出しに
-    「概要パート」という文言が入る(例:「### シーン3：概要パート（0:14〜0:21）」)。
-    この文言を含む見出しのうち、最後のシーン番号を返す。見出しが見つからない
-    場合(古い形式の台本など)は1を返す。
+    script_agentの設計上、概要パートであることを示す「概要パート」という
+    文言は最初のシーンの見出しにしか入らないことがある(シーン2以降は
+    見出しに固有タイトルだけが付き、文言が繰り返されるとは限らない)ため、
+    見出しの文言ではなく、各シーンの見出しにある開始時刻目安
+    (「（mm:ss〜」の部分)を使う。開始時刻が1:00未満の最後のシーンを
+    概要パートの終わりとみなす(時刻は台本作成時点の目安であり、実際の
+    尺はVOICEVOXの実測に基づくscene_boundaries.jsonが別途優先される)。
+    時刻付き見出しが1つも見つからない場合(古い形式の台本など)は1を返す。
     """
-    scene_numbers = [int(m) for m in _OVERVIEW_SCENE_HEADING_RE.findall(script_text)]
-    return max(scene_numbers) if scene_numbers else 1
+    matches = _SCENE_HEADING_TIME_RE.findall(script_text)
+    if not matches:
+        return 1
+
+    last_overview_scene = 1
+    for scene_str, minute_str, second_str in matches:
+        if int(minute_str) * 60 + int(second_str) >= 60:
+            break
+        last_overview_scene = int(scene_str)
+    return last_overview_scene
 
 
 def _run_ffmpeg(args: list[str]) -> subprocess.CompletedProcess:
@@ -313,6 +326,77 @@ def _rebase_interval(
     return ((clipped_start - window_start) / speed, (clipped_end - window_start) / speed)
 
 
+_SLIDE_TEXT_ZOOM_END_SCALE = 1.06  # 表示終了時点でのズーム倍率(1.0=無ズーム)
+_SLIDE_TEXT_ZOOM_UPSCALE_FACTOR = 2
+
+
+def _render_slide_text_zoom_clip(
+    image_path: Path,
+    duration: float,
+    output_path: Path,
+    width: int,
+    height: int,
+    fps: int = VIDEO_FPS,
+    zoom_end_scale: float = _SLIDE_TEXT_ZOOM_END_SCALE,
+) -> Path:
+    """中段の文字カード1枚から、ゆっくりズームインするKen Burns風のクリップを作る。
+
+    本編スライドのズーム(video_assembler._render_zoom_clip)と同じ手法。
+    静止画のままだと中段だけシーン中は完全に無変化に見えてしまうため、
+    ごくわずかなズームで「画面が生きている」印象を持たせる。
+    """
+    frame_count = max(1, round(duration * fps)) + fps  # 余裕を持って多めに生成
+    zoom_increment = (zoom_end_scale - 1.0) / max(1, round(duration * fps))
+    upscale_w = width * _SLIDE_TEXT_ZOOM_UPSCALE_FACTOR
+    upscale_h = height * _SLIDE_TEXT_ZOOM_UPSCALE_FACTOR
+    zoompan_filter = (
+        f"scale={upscale_w}:{upscale_h}:force_original_aspect_ratio=increase,"
+        f"crop={upscale_w}:{upscale_h},"
+        f"zoompan=z='min(zoom+{zoom_increment:.8f},{zoom_end_scale})':"
+        f"d={frame_count}:s={width}x{height}:fps={fps}"
+    )
+    _run_ffmpeg(
+        [
+            "-loop",
+            "1",
+            "-i",
+            str(image_path),
+            "-vf",
+            zoompan_filter,
+            "-t",
+            f"{duration:.3f}",
+            "-r",
+            str(fps),
+            "-pix_fmt",
+            "yuv420p",
+            str(output_path),
+        ]
+    )
+    return output_path
+
+
+def _build_static_slide_text_clip(
+    image_path: Path, duration: float, output_path: Path, fps: int = VIDEO_FPS
+) -> Path:
+    """ズーム生成に失敗した場合のフォールバック用に、無ズームの静止表示クリップを作る。"""
+    _run_ffmpeg(
+        [
+            "-loop",
+            "1",
+            "-t",
+            f"{duration:.3f}",
+            "-i",
+            str(image_path),
+            "-r",
+            str(fps),
+            "-pix_fmt",
+            "yuv420p",
+            str(output_path),
+        ]
+    )
+    return output_path
+
+
 def _build_slide_text_video(
     scenes: list[dict],
     window_start: float,
@@ -321,7 +405,12 @@ def _build_slide_text_video(
     output_duration: float,
     work_dir: Path,
 ) -> Path:
-    """シーンごとのスライド見出し・箇条書きを、切り替わる縦長映像として書き出す。"""
+    """シーンごとのスライド見出し・箇条書きを、切り替わる縦長映像として書き出す。
+
+    各シーンの文字カードにはゆっくりとしたズームイン(Ken Burns風)を常時
+    かける。シーンが切り替わっても、1枚のカードがその表示時間中ずっと
+    完全に無変化だと画面が止まっているように見えてしまうため。
+    """
     clips_dir = work_dir / "_shorts_slide_clips"
     clips_dir.mkdir(parents=True, exist_ok=True)
 
@@ -355,21 +444,16 @@ def _build_slide_text_video(
         image_path = clips_dir / f"slide_{i:03d}.png"
         image.save(image_path)
         clip_path = clips_dir / f"slide_{i:03d}.mp4"
-        _run_ffmpeg(
-            [
-                "-loop",
-                "1",
-                "-t",
-                f"{clip_duration:.3f}",
-                "-i",
-                str(image_path),
-                "-r",
-                str(VIDEO_FPS),
-                "-pix_fmt",
-                "yuv420p",
-                str(clip_path),
-            ]
-        )
+        try:
+            _render_slide_text_zoom_clip(
+                image_path, clip_duration, clip_path, SHORTS_WIDTH, SLIDE_AREA_HEIGHT
+            )
+        except Exception as exc:  # noqa: BLE001 1枚の失敗で全体を止めない
+            print(
+                f"  [警告] シーン{i}の文字カードのズーム生成に失敗したため、"
+                f"静止表示にフォールバックします: {exc}"
+            )
+            _build_static_slide_text_clip(image_path, clip_duration, clip_path)
         clip_paths.append(clip_path)
 
     concat_path = clips_dir / "concat.txt"
@@ -411,13 +495,18 @@ def _build_character_video(
     output_duration: float,
     work_dir: Path,
 ) -> Path:
-    """つむぎ・ずんだもんの立ち絵を、本編と同じ口開閉オーバーレイで下段映像として書き出す。"""
+    """喋っている方のキャラクターだけを画面中央に大きく表示する下段映像を書き出す。
+
+    本編は2人の立ち絵を常時左右に並べて表示するが、縦長キャンバスでそのまま
+    2人並べると1人あたりが小さく窮屈になる。ショートでは話者が切り替わる
+    瞬間に表示するキャラクター自体を入れ替え、常にどちらか1人だけを
+    画面中央いっぱいに表示する(口の開閉は本編と同じ発話区間で行う)。
+    """
     out_path = work_dir / "characters.mp4"
     assets = character_asset_paths()
     bg_hex = f"0x{BAR_BG_COLOR[0]:02x}{BAR_BG_COLOR[1]:02x}{BAR_BG_COLOR[2]:02x}"
 
-    if not assets:
-        print("  [警告] assets/characters/にキャラクター立ち絵が見つかりません。無地の背景で代用します")
+    def _blank_background() -> Path:
         _run_ffmpeg(
             [
                 "-f",
@@ -433,12 +522,41 @@ def _build_character_video(
         )
         return out_path
 
-    intervals_by_speaker: dict[str, list[tuple[float, float]]] = {}
+    if not assets:
+        print("  [警告] assets/characters/にキャラクター立ち絵が見つかりません。無地の背景で代用します")
+        return _blank_background()
+
+    rebased_lines: list[tuple[str, float, float]] = []
     for item in speaker_timeline:
         rebased = _rebase_interval(item["start"], item["end"], window_start, window_end, speed)
         if rebased is None:
             continue
-        intervals_by_speaker.setdefault(item["speaker"], []).append(rebased)
+        rebased_lines.append((item["speaker"], rebased[0], rebased[1]))
+
+    if not rebased_lines:
+        return _blank_background()
+
+    # 表示区間: 話者が喋り始めた瞬間に表示するキャラクターを切り替え、次の
+    # 話者が喋り始めるまで(セリフ間の"間"も含めて)そのまま表示し続ける
+    # (発話区間だけを表示すると、間の無音中に誰も映らず不自然になるため)。
+    # 両端は切り出し区間の先頭・末尾ぴったりに合わせる。
+    display_segments: list[tuple[str, float, float]] = []
+    for i, (speaker, local_start, _local_end) in enumerate(rebased_lines):
+        next_start = rebased_lines[i + 1][1] if i + 1 < len(rebased_lines) else output_duration
+        display_segments.append((speaker, local_start, next_start))
+    speaker0, _, end0 = display_segments[0]
+    display_segments[0] = (speaker0, 0.0, end0)
+
+    display_intervals: dict[str, list[tuple[float, float]]] = {}
+    for speaker, start, end in display_segments:
+        display_intervals.setdefault(speaker, []).append((start, end))
+
+    talk_intervals: dict[str, list[tuple[float, float]]] = {}
+    for speaker, start, end in rebased_lines:
+        talk_intervals.setdefault(speaker, []).append((start, end))
+
+    x_expr = "(main_w-overlay_w)/2"
+    y_expr = "main_h-overlay_h"
 
     ffmpeg_inputs: list[str] = []
     input_index = 0
@@ -448,16 +566,10 @@ def _build_character_video(
     current_label = "bg0"
     stage = 0
     for speaker in CHARACTER_PREFIXES:
-        if speaker not in assets:
+        if speaker not in assets or speaker not in display_intervals:
             continue
-        position = CHARACTER_POSITIONS.get(speaker, "left")
-        x_expr = (
-            str(CHARACTER_MARGIN_X)
-            if position == "left"
-            else f"main_w-overlay_w-{CHARACTER_MARGIN_X}"
-        )
-        y_expr = "main_h-overlay_h"
-        enable_expr = build_enable_expr(intervals_by_speaker.get(speaker, []))
+        display_enable_expr = build_enable_expr(display_intervals[speaker])
+        talk_enable_expr = build_enable_expr(talk_intervals.get(speaker, []))
 
         closed_path = _crop_character_image(assets[speaker]["closed"], work_dir)
         open_path = _crop_character_image(assets[speaker]["open"], work_dir)
@@ -476,11 +588,11 @@ def _build_character_video(
 
         closed_out = f"bg{stage + 1}c"
         filter_stages.append(
-            f"[{current_label}][{closed_label}]overlay=x={x_expr}:y={y_expr}:enable='1'[{closed_out}]"
+            f"[{current_label}][{closed_label}]overlay=x={x_expr}:y={y_expr}:enable='{display_enable_expr}'[{closed_out}]"
         )
         open_out = f"bg{stage + 1}o"
         filter_stages.append(
-            f"[{closed_out}][{open_label}]overlay=x={x_expr}:y={y_expr}:enable='{enable_expr}'[{open_out}]"
+            f"[{closed_out}][{open_label}]overlay=x={x_expr}:y={y_expr}:enable='{talk_enable_expr}'[{open_out}]"
         )
         current_label = open_out
         stage += 1
