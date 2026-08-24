@@ -29,10 +29,8 @@ scene_boundaries.jsonがあればそのシーンの正確な終了時刻を使�
 scene_boundaries.jsonが無い場合はdurationを目安秒数として使うが、
 指定秒数ぴったりで切ると、セリフの途中で途切れてしまう不具合が実際に
 発生したため、指定秒数付近の無音区間(セリフの間)を検出し、そこに合わせて
-実際の切り出し秒数を調整する。ただし先頭のタイトル/サムネイル静止区間
-(TITLE_SLIDE_DURATION_SECONDS)はスキップし、本編の動きが始まる最初の
-シーンから切り出す(静止画始まりはショートの「視聴を選択した割合」を
-大きく下げることが実際のアナリティクスで確認されたため)。
+実際の切り出し秒数を調整する。動画は冒頭から本編(解説)が始まる構成のため、
+先頭からそのまま切り出す。
 """
 
 import json
@@ -46,7 +44,6 @@ from video_pipeline.video_assembler import (
     CHARACTER_MARGIN_X,
     CHARACTER_POSITIONS,
     CHARACTER_PREFIXES,
-    TITLE_SLIDE_DURATION_SECONDS,
     VIDEO_FPS,
     build_enable_expr,
     character_asset_paths,
@@ -516,7 +513,7 @@ def build_shorts_video(
     exact_end_time: float | None = None,
     work_dir: str | Path | None = None,
     speed: float = DEFAULT_SHORTS_SPEED,
-    start_offset: float = TITLE_SLIDE_DURATION_SECONDS,
+    start_offset: float = 0.0,
 ) -> Path:
     """完成動画の冒頭を切り出し、上段=フック文言/中段=スライド文字/下段=キャラクター
     の9:16ショート動画として書き出す。

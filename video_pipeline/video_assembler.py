@@ -27,10 +27,9 @@ ASS(Advanced SubStation Alpha)形式の字幕を生成し、ffmpegの`ass`フィ
 
 タイミングの一致について(重要):
   音声トラック・字幕・スライド表示時間は、すべて同じ「cursor」の積み上げ
-  (無音のタイトル区間 + 各セリフの実測時間 + セリフ間の間)から計算しており、
-  この3つが食い違わないようにしている。以前は音声トラック側にタイトル区間の
-  無音を入れ忘れていたため、字幕・映像より音声が2秒ほど早く進んでしまう
-  不具合があった。
+  (各セリフの実測時間 + セリフ間の間)から計算しており、この3つが
+  食い違わないようにしている。動画は冒頭のタイトルスライドを挟まず、
+  最初のセリフからそのまま始まる。
 """
 
 import hashlib
@@ -77,7 +76,6 @@ CHARACTER_VIDEO_HEIGHT = 300
 VIDEO_WIDTH = 1920
 VIDEO_HEIGHT = 1080
 VIDEO_FPS = 25
-TITLE_SLIDE_DURATION_SECONDS = 1.0
 # セリフとセリフの間に挿入する無音の長さ(秒)。会話らしい"間"を作るため。
 PAUSE_BETWEEN_LINES_SECONDS = 0.4
 SUBTITLE_FONT_SIZE = 64
@@ -219,11 +217,10 @@ def synthesize_timeline(
     渡す(voicevox_script.txtは経由しない)。これにより字幕テキスト・音声・
     シーン番号が常に一致することを保証する。
 
-    戻り値の2つ目(audio_segments)は、タイトル区間の無音・各セリフの実音声・
-    セリフ間の無音を全て含んだ「音声結合に使うファイルの並び」。この並びを
-    そのまま結合すれば、字幕・スライド表示時間の計算に使うcursorと
-    完全に一致した長さの音声トラックになる(音声だけがタイトル無音分早く
-    始まってしまう、というズレを防ぐための設計)。
+    戻り値の2つ目(audio_segments)は、各セリフの実音声・セリフ間の無音を
+    全て含んだ「音声結合に使うファイルの並び」。この並びをそのまま結合
+    すれば、字幕・スライド表示時間の計算に使うcursorと完全に一致した
+    長さの音声トラックになる。
     """
     style_map = style_map or {}
     work_dir = Path(work_dir)
@@ -246,7 +243,7 @@ def synthesize_timeline(
     timeline: list[TimedLine] = []
     audio_segments: list[Path] = []
     reference_audio_path: Path | None = None
-    cursor = TITLE_SLIDE_DURATION_SECONDS
+    cursor = 0.0
 
     for i, line in enumerate(all_lines):
         if line.speaker not in speaker_id_cache:
@@ -301,13 +298,6 @@ def synthesize_timeline(
             _write_silence_wav(pause_path, pause_seconds, reference_audio_path)
             audio_segments.append(pause_path)
             cursor += pause_seconds
-
-    if reference_audio_path is not None:
-        title_silence_path = work_dir / "title_silence.wav"
-        _write_silence_wav(
-            title_silence_path, TITLE_SLIDE_DURATION_SECONDS, reference_audio_path
-        )
-        audio_segments.insert(0, title_silence_path)
 
     return timeline, audio_segments
 
@@ -428,7 +418,7 @@ def _compute_scene_boundaries(
             scene_start[item.scene_number] = item.start
 
     ordered_scenes = sorted(scene_start, key=lambda sn: scene_start[sn])
-    final_end = timeline[-1].end if timeline else TITLE_SLIDE_DURATION_SECONDS
+    final_end = timeline[-1].end if timeline else 0.0
 
     boundaries: dict[int, tuple[float, float]] = {}
     for i, scene_number in enumerate(ordered_scenes):
@@ -526,7 +516,6 @@ def _build_visual_timeline(
     """
     manifest = _load_slides_manifest(slides_dir)
 
-    title_entry = next((m for m in manifest if m["scene_number"] is None), None)
     scene_to_files: dict[int, list[str]] = {}
     for entry in manifest:
         scene_number = entry.get("scene_number")
@@ -539,10 +528,6 @@ def _build_visual_timeline(
     scene_duration = {sn: end - start for sn, (start, end) in boundaries.items()}
 
     visual_timeline: list[tuple[Path, float]] = []
-    if title_entry:
-        visual_timeline.append(
-            (slides_dir / title_entry["file"], TITLE_SLIDE_DURATION_SECONDS)
-        )
 
     for scene_number in ordered_scenes:
         total = scene_duration[scene_number]
@@ -567,11 +552,7 @@ def _build_visual_timeline(
 def _compute_slide_transition_times(
     visual_timeline: list[tuple[Path, float]],
 ) -> list[float]:
-    """スライドが切り替わる時刻(2番目以降の各要素の開始時刻)のリストを返す。
-
-    先頭(タイトル区間)から最初の本編スライドへの切り替わりも
-    1回のページめくりとして含める。
-    """
+    """スライドが切り替わる時刻(2番目以降の各要素の開始時刻)のリストを返す。"""
     times: list[float] = []
     cursor = 0.0
     for i, (_, duration) in enumerate(visual_timeline):
