@@ -1,20 +1,21 @@
 """動画にあわせて画面に出すスライドの内容を生成・評価・修正するエージェント。
 
 生成物はslide_image_builderでそのまま描画できるよう、layoutフィールドで
-6種類のレイアウトのいずれかを指定する構造で扱う:
+7種類のレイアウトのいずれかを指定する構造で扱う:
 - bullets:     タイトル+箇条書き(従来の標準レイアウト)
 - stat:        1つの数値・指標を大きく見せる(例: 0.79 -> 0.83)
 - quote:       1行のキーメッセージを大きく見せる
 - comparison:  2つの対象を左右に並べて比較する
 - code:        記事中の実際のコードブロックをシンタックスハイライト付きで表示
 - diagram:     記事中の実際のmermaid図を画像として表示
+- table:       記事中の実際の表を画像として表示
 
 どのレイアウトにも background_prompt（背景に敷く抽象イラストの生成プロンプト、
 文字・数字は含めない）と scene_number（台本のシーン番号。動画組み立て時に
 音声とスライドを対応させるための機械可読な値）を持たせる。実際のテキストは
 背景の上にPillowで正確に描画するため、背景画像に数値やコードの正確性を
-求める必要はない。code/diagramはbackground_promptを使わない(記事そのものの
-コード/図が主役のため)。
+求める必要はない。code/diagram/tableはbackground_promptを使わない(記事
+そのもののコード/図/表が主役のため)。
 """
 
 import json
@@ -60,6 +61,12 @@ NotebookLMのVideo Overviewのように、内容によってスライドのレ�
   番号をそのまま使う(創作禁止。存在しない番号を使わない)
 - captionはその図の要点を一言で(無ければ空文字)。background_promptは使わない
 
+## layout: "table"（台本のセリフで記事中の具体的な表に言及しているスライド）
+{"layout": "table", "scene_number": 1, "title": "...", "table_ref": 0, "caption": "...", "notes": "..."}
+- table_refは、渡された「記事中の表一覧」に書かれているtable_refの
+  番号をそのまま使う(創作禁止。存在しない番号を使わない)
+- captionはその表の要点を一言で(無ければ空文字)。background_promptは使わない
+
 scene_numberについて（重要）:
 - 台本の見出し「### シーン<N>：〜」の<N>の数字をそのまま入れる
   （動画組み立て時に音声とスライドを対応させるために使う機械可読な値なので、
@@ -96,15 +103,18 @@ scene_numberについて（重要）:
   - 【重要】台本のセリフが記事中の具体的なmermaid図に言及しているシーンでは
     同様に「記事中のmermaid図一覧」から該当するdiagram_refを選んで
     "diagram"レイアウトにする
-  - コードブロック/mermaid図が渡されていない場合や、台本がどれにも
-    具体的に言及していない場合は、code/diagramレイアウトを使わなくてよい
-    (存在しないcode_ref/diagram_refを創作するより、bulletsにする方が良い)
-  - stat/quote/comparisonは合計して全体の1〜3割程度、残りをbullets/code/diagramに
+  - 【重要】台本のセリフが記事中の具体的な表に言及しているシーンでは、
+    表の中身を"bullets"で箇条書きに書き下すのではなく、渡された
+    「記事中の表一覧」から該当するtable_refを選んで"table"レイアウトにする
+  - コードブロック/mermaid図/表が渡されていない場合や、台本がどれにも
+    具体的に言及していない場合は、code/diagram/tableレイアウトを使わなくてよい
+    (存在しないcode_ref/diagram_ref/table_refを創作するより、bulletsにする方が良い)
+  - stat/quote/comparisonは合計して全体の1〜3割程度、残りをbullets/code/diagram/tableに
     する（動画全体でstat/quote/comparisonが1枚も無いのは失格。使いすぎて
     散漫になるのも避ける）
 - 箇条書きは体言止め・短文中心にし、長い説明文をそのまま貼らない
 - 図解（mermaidのフローチャートなど）や表を説明するスライドで、対応する
-  mermaid図が渡されていない場合は、bulletsにその要点を言葉で書く
+  mermaid図/表が渡されていない場合は、bulletsにその要点を言葉で書く
 
 background_promptについて（重要。bullets/stat/quote/comparisonで使用。
 code/diagramでは使わない）:
@@ -142,11 +152,11 @@ EVALUATE_SYSTEM = """あなたはスライド構成のレビュアーです。�
 - 【重要】"stat"・"quote"・"comparison"それぞれが最低1枚以上使われているか。
   1枚も無いレイアウトがあれば必ず大きく減点し、台本のどの部分をそのレイアウトに
   すべきか具体的にフィードバックに書く（例:「シーン10の0.79→0.83の箇所をstatに」）
-- 【重要】台本のセリフが記事中の具体的なコード/mermaid図に言及しているのに、
-  対応する"code"/"diagram"レイアウトを使わず"bullets"で済ませているスライドが
-  無いか。あれば減点し、該当するcode_ref/diagram_refを指摘する
-- code_ref/diagram_refが、渡された一覧に実在する番号か（存在しない番号を
-  創作していたら大きく減点する）
+- 【重要】台本のセリフが記事中の具体的なコード/mermaid図/表に言及しているのに、
+  対応する"code"/"diagram"/"table"レイアウトを使わず"bullets"で済ませている
+  スライドが無いか。あれば減点し、該当するcode_ref/diagram_ref/table_refを指摘する
+- code_ref/diagram_ref/table_refが、渡された一覧に実在する番号か（存在しない
+  番号を創作していたら大きく減点する）
 - layoutの選び方が内容に合っているか（単なる箇条書きで済む内容にstat/quoteを
   無理に使っていないか、逆に強調すべき数値やキーメッセージがbulletsに埋もれて
   いないか）。"stat"/"quote"/"comparison"を使いすぎて散漫になっていないか
@@ -162,9 +172,9 @@ JSON形式 {"score": <int>, "feedback": "<改善点。問題なければ空文�
 
 REVISE_SYSTEM = """あなたはスライド構成の修正担当です。フィードバックに基づいて
 スライド内容を修正してください。各スライドは"layout"フィールド
-("bullets"/"stat"/"quote"/"comparison"/"code"/"diagram"のいずれか)と、
+("bullets"/"stat"/"quote"/"comparison"/"code"/"diagram"/"table"のいずれか)と、
 台本のシーン番号と一致した"scene_number"(整数)を持つ構造を維持してください。
-code_ref/diagram_refは渡された一覧に実在する番号だけを使ってください。
+code_ref/diagram_ref/table_refは渡された一覧に実在する番号だけを使ってください。
 出力はJSONのみ: {"slides": [<layoutに応じた形式のオブジェクト>, ...]}
 """
 

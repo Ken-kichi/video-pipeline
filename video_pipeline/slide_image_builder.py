@@ -14,6 +14,7 @@ Noto Sans JP(可変フォント、OFLライセンス)をvideo_pipeline/assets/fo
 - stat:       1つの数値・指標を大きく見せる
 - quote:      1行のキーメッセージを大きく見せる
 - comparison: 2つの対象を左右に並べて比較する
+- code/diagram/table: 記事中の実際のコード/mermaid図/表を画像として表示する
 
 背景(Gemini生成、任意): background_pathが設定されている場合、その画像を
 スライド全面に敷き、その上に半透明の白パネル(スクリム)を重ねてから文字を
@@ -453,6 +454,11 @@ def _render_diagram(
     _render_media_layout(img, draw, slide_data, "diagram_image_path")
 
 
+def _render_table(img: Image.Image, draw: ImageDraw.ImageDraw, slide_data: dict) -> None:
+    """記事中の実際の表を表示するレイアウト。"""
+    _render_media_layout(img, draw, slide_data, "table_image_path")
+
+
 _LAYOUT_RENDERERS = {
     "bullets": _render_bullets,
     "stat": _render_stat,
@@ -460,6 +466,7 @@ _LAYOUT_RENDERERS = {
     "comparison": _render_comparison,
     "code": _render_code,
     "diagram": _render_diagram,
+    "table": _render_table,
 }
 
 _LAYOUT_FALLBACK_COLOR = {
@@ -469,6 +476,7 @@ _LAYOUT_FALLBACK_COLOR = {
     "comparison": BG_COLOR,
     "code": BG_COLOR,
     "diagram": BG_COLOR,
+    "table": BG_COLOR,
 }
 
 
@@ -519,7 +527,7 @@ def extract_shorts_text(slide_data: dict) -> tuple[str, list[str]]:
         return heading, ([context] if context else [])
     if layout == "comparison":
         return slide_data.get("title", ""), []
-    if layout in ("code", "diagram"):
+    if layout in ("code", "diagram", "table"):
         return slide_data.get("title", ""), []
     return slide_data.get("title", ""), list(slide_data.get("bullets", []))
 
