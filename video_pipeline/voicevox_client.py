@@ -164,8 +164,8 @@ def mouth_open_intervals_from_query(
     raw_intervals: list[tuple[float, float]] = []
     cursor = query.get("prePhonemeLength") or 0.0
 
-    for phrase in query.get("accent_phrases", []):
-        for mora in phrase.get("moras", []):
+    for phrase in query.get("accent_phrases") or []:
+        for mora in phrase.get("moras") or []:
             cursor += mora.get("consonant_length") or 0.0
             vowel_length = mora.get("vowel_length") or 0.0
             if vowel_length > 0:

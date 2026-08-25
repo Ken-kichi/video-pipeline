@@ -291,10 +291,17 @@ def synthesize_timeline(
 
         duration = _wav_duration_seconds(audio_path)
         local_mouth_intervals = mouth_open_intervals_from_query(query)
-        mouth_open_intervals = [
-            (cursor + start, min(cursor + end, cursor + duration))
-            for start, end in local_mouth_intervals
-        ]
+        mouth_open_intervals = []
+        for start, end in local_mouth_intervals:
+            # audio_queryのモーラ長合計と実際のwav尺は理論上ほぼ一致するはずだが、
+            # エンジン側の丸め等でわずかにズレる可能性があるため両端をクランプし、
+            # クランプの結果start>=endになった区間(尺の外側にはみ出た分)は捨てる。
+            clamped_start = max(0.0, min(start, duration))
+            clamped_end = max(0.0, min(end, duration))
+            if clamped_end > clamped_start:
+                mouth_open_intervals.append(
+                    (cursor + clamped_start, cursor + clamped_end)
+                )
         timeline.append(
             TimedLine(
                 speaker=line.speaker,
