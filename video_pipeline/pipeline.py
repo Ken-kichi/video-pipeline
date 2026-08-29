@@ -254,6 +254,7 @@ def run_pipeline(
     article_url: str | None = None,
     generate_images: bool | None = None,
     mention_article: bool | None = None,
+    pregenerated_script: str | None = None,
 ) -> dict:
     article_text = read_markdown(article_path)
     article_url = article_url or DEFAULT_ARTICLE_URL_PLACEHOLDER
@@ -271,7 +272,11 @@ def run_pipeline(
         )
 
     print("=== 台本エージェント ===")
-    script, script_score, _ = script_agent.run(article_text, mention_article)
+    if pregenerated_script is not None:
+        print("  事前に確定済みの台本を使用します（生成をスキップ）")
+        script, script_score = pregenerated_script, 100
+    else:
+        script, script_score, _ = script_agent.run(article_text, mention_article)
 
     print("=== スライドエージェント ===")
     slides, slides_score, _ = slides_agent.run(article_text, script, asset_summary)
