@@ -149,10 +149,58 @@ def build_enable_expr(intervals: list[tuple[float, float]]) -> str:
     """between(t,s,e)の和で、ffmpegのenableオプション用の式を作る。
 
     区間が1つも無ければ常に偽("0")を返す。
+
+    注意: ffmpegの式パーサはbetween(...)を+で繋いだ項が約100個を超えると
+    スタックを使い果たし、フィルタ初期化が"Cannot allocate memory"で失敗する
+    (実測: 101項でNG、100項までOK)。区間数が多くなりうる呼び出し元
+    (口パクのモーラ単位区間を長尺動画全体に適用する場合など)では、
+    この関数を直接使わずMAX_ENABLE_EXPR_TERMS単位に分割してoverlayフィルタを
+    複数段チェーンするappend_overlay_stage()を使うこと。
     """
     if not intervals:
         return "0"
     return "+".join(f"between(t,{start:.3f},{end:.3f})" for start, end in intervals)
+
+
+# ffmpegの式パーサの実測上限(build_enable_expr参照)。安全に収まるよう
+# 上限ちょうどではなく少し余裕を持たせた値にする。
+MAX_ENABLE_EXPR_TERMS = 90
+
+
+def append_overlay_stage(
+    filter_stages: list[str],
+    current_label: str,
+    layer_label: str,
+    x_expr: str,
+    y_expr: str,
+    intervals: list[tuple[float, float]],
+    stage_label_prefix: str,
+) -> str:
+    """current_labelにlayer_labelをintervalsの時間帯だけ重ねるoverlay段を追加する。
+
+    区間数がMAX_ENABLE_EXPR_TERMSを超える場合、1つのenable式に収まらず
+    ffmpegの式パーサが失敗する(build_enable_expr参照)ため、区間を
+    MAX_ENABLE_EXPR_TERMS件ずつに分けて複数のoverlayフィルタにチェーンする
+    (同じ画像レイヤーを複数のoverlayから参照しても、ffmpegが自動的に
+    出力を分岐してくれるためsplitフィルタは不要)。各チャンクの区間は
+    互いに重ならないため、順番に適用しても1つの式で表現した場合と
+    同じ結果になる。
+
+    区間が1つも無ければfilter_stagesに何も追加せず、current_labelを
+    そのまま返す(常に偽の式を1段追加するのと同じ結果になるが、
+    フィルタ段を1つ節約できる)。
+    """
+    label = current_label
+    for i in range(0, len(intervals), MAX_ENABLE_EXPR_TERMS):
+        chunk = intervals[i : i + MAX_ENABLE_EXPR_TERMS]
+        enable_expr = build_enable_expr(chunk)
+        out_label = f"{stage_label_prefix}{i}"
+        filter_stages.append(
+            f"[{label}][{layer_label}]overlay=x={x_expr}:y={y_expr}:"
+            f"enable='{enable_expr}'[{out_label}]"
+        )
+        label = out_label
+    return label
 
 
 def _write_silence_wav(
@@ -876,7 +924,6 @@ def assemble_video(
             # 開けっぱなしにフォールバックする(口パク無しよりはこちらの方が自然)
             for interval in (item.mouth_open_intervals or [(item.start, item.end)])
         ]
-        enable_expr = build_enable_expr(intervals)
 
         ffmpeg_inputs += ["-i", str(assets["closed"])]
         closed_idx = input_index
@@ -895,17 +942,23 @@ def assemble_video(
         )
 
         bg_closed_label = f"bg{input_index}c"
-        bg_open_label = f"bg{input_index}o"
         # まず口を閉じた状態を常時オーバーレイ(=待機中のデフォルト表示)、
-        # その上に口を開いた状態を、そのキャラクターが喋っている区間だけ重ねる
+        # その上に口を開いた状態を、そのキャラクターが喋っている区間だけ重ねる。
+        # 区間数が多い(セリフの多い長尺動画)場合、1つのenable式に収まらず
+        # ffmpegの式パーサが失敗するため、append_overlay_stageで
+        # MAX_ENABLE_EXPR_TERMSごとにoverlay段を分割する
         filter_stages.append(
             f"[{current_label}][{closed_scaled_label}]overlay=x={x_expr}:y={y_expr}[{bg_closed_label}]"
         )
-        filter_stages.append(
-            f"[{bg_closed_label}][{open_scaled_label}]overlay=x={x_expr}:y={y_expr}:"
-            f"enable='{enable_expr}'[{bg_open_label}]"
+        current_label = append_overlay_stage(
+            filter_stages,
+            bg_closed_label,
+            open_scaled_label,
+            x_expr,
+            y_expr,
+            intervals,
+            f"bg{input_index}o",
         )
-        current_label = bg_open_label
 
     filter_stages.append(
         f"[{current_label}]ass=filename={ass_path_arg}:fontsdir={fonts_dir_arg}[vout]"

@@ -46,7 +46,7 @@ from PIL import Image, ImageDraw, ImageFont
 from video_pipeline.video_assembler import (
     CHARACTER_PREFIXES,
     VIDEO_FPS,
-    build_enable_expr,
+    append_overlay_stage,
     character_asset_paths,
 )
 
@@ -579,8 +579,6 @@ def _build_character_video(
     for speaker in CHARACTER_PREFIXES:
         if speaker not in assets or speaker not in display_intervals:
             continue
-        display_enable_expr = build_enable_expr(display_intervals[speaker])
-        talk_enable_expr = build_enable_expr(talk_intervals.get(speaker, []))
 
         closed_path = _crop_character_image(assets[speaker]["closed"], work_dir)
         open_path = _crop_character_image(assets[speaker]["open"], work_dir)
@@ -597,15 +595,26 @@ def _build_character_video(
         filter_stages.append(f"[{closed_idx}:v]scale=-2:{CHARACTER_SHORTS_HEIGHT}[{closed_label}]")
         filter_stages.append(f"[{open_idx}:v]scale=-2:{CHARACTER_SHORTS_HEIGHT}[{open_label}]")
 
-        closed_out = f"bg{stage + 1}c"
-        filter_stages.append(
-            f"[{current_label}][{closed_label}]overlay=x={x_expr}:y={y_expr}:enable='{display_enable_expr}'[{closed_out}]"
+        # 区間数が多い場合ffmpegの式パーサが壊れるため、append_overlay_stageで
+        # MAX_ENABLE_EXPR_TERMSごとにoverlay段を分割する(video_assembler参照)
+        current_label = append_overlay_stage(
+            filter_stages,
+            current_label,
+            closed_label,
+            x_expr,
+            y_expr,
+            display_intervals[speaker],
+            f"bg{stage}c",
         )
-        open_out = f"bg{stage + 1}o"
-        filter_stages.append(
-            f"[{closed_out}][{open_label}]overlay=x={x_expr}:y={y_expr}:enable='{talk_enable_expr}'[{open_out}]"
+        current_label = append_overlay_stage(
+            filter_stages,
+            current_label,
+            open_label,
+            x_expr,
+            y_expr,
+            talk_intervals.get(speaker, []),
+            f"bg{stage}o",
         )
-        current_label = open_out
         stage += 1
 
     filter_stages.append(f"[{current_label}]format=yuv420p[vout]")
