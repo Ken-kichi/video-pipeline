@@ -1,10 +1,11 @@
-"""記事(Markdown)からコードブロック・mermaid図・表を抽出する。
+"""記事(Markdown)からコードブロック・mermaid図・表・画像URLを抽出する。
 
-script_agent/slides_agentがセリフやスライドで記事中の図・コード・表に
+script_agent/slides_agentがセリフやスライドで記事中の図・コード・表・画像に
 言及した際、それを実際にスライドへ貼り付けられるように、事前に記事から
 抜き出してインデックス付きで保持しておく。抽出はMarkdownのフェンス付き
-コードブロック(```lang ... ```)とパイプ区切りの表(| ... | ... |)を
-正規表現で決定的にパースするだけで、LLMには依存しない。
+コードブロック(```lang ... ```)、パイプ区切りの表(| ... | ... |)、
+画像記法(![alt](https://...))を正規表現で決定的にパースするだけで、
+LLMには依存しない。
 """
 
 import re
@@ -13,6 +14,9 @@ from dataclasses import dataclass
 _FENCE_RE = re.compile(r"^```(\S*)\s*$")
 _HEADING_RE = re.compile(r"^(#{1,6})\s+(.+?)\s*$")
 _TABLE_SEPARATOR_CELL_RE = re.compile(r"^:?-{2,}:?$")
+# 記事中の画像記法(![alt](https://...))から、外部URLの画像だけを拾う
+# (ローカル相対パスは記事執筆環境依存でダウンロードできないため対象外)
+_IMAGE_RE = re.compile(r"!\[([^\]]*)\]\((https?://[^\s)]+)(?:\s+\"[^\"]*\")?\)")
 
 
 @dataclass
@@ -36,6 +40,14 @@ class TableBlock:
     header: list[str]
     rows: list[list[str]]
     heading_context: str  # 直前に出てきた見出し(どのセクションの表か)
+
+
+@dataclass
+class ImageBlock:
+    index: int
+    url: str
+    alt_text: str
+    heading_context: str  # 直前に出てきた見出し(どのセクションの画像か)
 
 
 _BR_TAG_RE = re.compile(r"<br\s*/?>", re.IGNORECASE)
@@ -66,16 +78,18 @@ def _is_table_separator_row(line: str) -> bool:
 
 def extract_article_assets(
     article_text: str,
-) -> tuple[list[CodeBlock], list[DiagramBlock], list[TableBlock]]:
-    """記事からコードブロック・mermaid図・表をそれぞれ抜き出す。
+) -> tuple[list[CodeBlock], list[DiagramBlock], list[TableBlock], list[ImageBlock]]:
+    """記事からコードブロック・mermaid図・表・画像URLをそれぞれ抜き出す。
 
     mermaid図(```mermaid)はdiagramsに、それ以外の言語のコードブロックは
-    codesに、Markdownのパイプ区切り表はtablesに分けて格納する。
+    codesに、Markdownのパイプ区切り表はtablesに、外部URLを指す画像記法
+    (![alt](https://...))はimagesに分けて格納する。
     それぞれ記事内での出現順に0始まりのindexを振る。
     """
     codes: list[CodeBlock] = []
     diagrams: list[DiagramBlock] = []
     tables: list[TableBlock] = []
+    images: list[ImageBlock] = []
 
     current_heading = ""
     in_fence = False
@@ -158,15 +172,26 @@ def extract_article_assets(
             )
             continue
 
+        for alt_text, url in _IMAGE_RE.findall(raw_line):
+            images.append(
+                ImageBlock(
+                    index=len(images),
+                    url=url,
+                    alt_text=alt_text,
+                    heading_context=current_heading,
+                )
+            )
+
         i += 1
 
-    return codes, diagrams, tables
+    return codes, diagrams, tables, images
 
 
 def summarize_for_prompt(
     codes: list[CodeBlock],
     diagrams: list[DiagramBlock],
     tables: list[TableBlock] | None = None,
+    images: list[ImageBlock] | None = None,
     max_chars: int = 120,
 ) -> str:
     """slides_agentのプロンプトに埋め込む、コード/図/表の一覧サマリーを作る。"""
@@ -195,6 +220,14 @@ def summarize_for_prompt(
             lines.append(
                 f"- table_ref={t.index} [{len(t.rows)}行] (「{t.heading_context}」節) "
                 f"列: {preview}"
+            )
+
+    if images:
+        lines.append("## 記事中の画像一覧(image_refで参照)")
+        for img in images:
+            alt_preview = (img.alt_text or "(alt無し)")[:max_chars]
+            lines.append(
+                f"- image_ref={img.index} (「{img.heading_context}」節) {alt_preview}"
             )
 
     return "\n".join(lines)

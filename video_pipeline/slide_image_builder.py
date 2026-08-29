@@ -14,7 +14,7 @@ Noto Sans JP(可変フォント、OFLライセンス)をvideo_pipeline/assets/fo
 - stat:       1つの数値・指標を大きく見せる
 - quote:      1行のキーメッセージを大きく見せる
 - comparison: 2つの対象を左右に並べて比較する
-- code/diagram/table: 記事中の実際のコード/mermaid図/表を画像として表示する
+- code/diagram/table/image: 記事中の実際のコード/mermaid図/表/画像を表示する
 
 背景(Gemini生成、任意): background_pathが設定されている場合、その画像を
 スライド全面に敷き、その上に半透明の白パネル(スクリム)を重ねてから文字を
@@ -459,6 +459,11 @@ def _render_table(img: Image.Image, draw: ImageDraw.ImageDraw, slide_data: dict)
     _render_media_layout(img, draw, slide_data, "table_image_path")
 
 
+def _render_image(img: Image.Image, draw: ImageDraw.ImageDraw, slide_data: dict) -> None:
+    """記事中の画像URLからダウンロードした画像を表示するレイアウト。"""
+    _render_media_layout(img, draw, slide_data, "article_image_path")
+
+
 _LAYOUT_RENDERERS = {
     "bullets": _render_bullets,
     "stat": _render_stat,
@@ -467,6 +472,7 @@ _LAYOUT_RENDERERS = {
     "code": _render_code,
     "diagram": _render_diagram,
     "table": _render_table,
+    "image": _render_image,
 }
 
 _LAYOUT_FALLBACK_COLOR = {
@@ -477,6 +483,7 @@ _LAYOUT_FALLBACK_COLOR = {
     "code": BG_COLOR,
     "diagram": BG_COLOR,
     "table": BG_COLOR,
+    "image": BG_COLOR,
 }
 
 
@@ -513,8 +520,8 @@ def extract_shorts_text(slide_data: dict) -> tuple[str, list[str]]:
     (見出し, 補足行のリスト)を取り出す。レイアウトごとに主役のテキスト
     フィールドが異なる(bulletsはtitle+bullets、statはstat_value、
     quoteはquote_textなど)ため、layoutに応じて対応するフィールドを選ぶ。
-    code/diagram(実際のコード・図を貼るレイアウト)は再現しても読めないため、
-    titleだけをそのまま見出しとして使う。
+    code/diagram/image(実際のコード・図・画像を貼るレイアウト)は再現しても
+    読めないため、titleだけをそのまま見出しとして使う。
     """
     layout = slide_data.get("layout", "bullets")
     if layout == "stat":
@@ -527,7 +534,7 @@ def extract_shorts_text(slide_data: dict) -> tuple[str, list[str]]:
         return heading, ([context] if context else [])
     if layout == "comparison":
         return slide_data.get("title", ""), []
-    if layout in ("code", "diagram", "table"):
+    if layout in ("code", "diagram", "table", "image"):
         return slide_data.get("title", ""), []
     return slide_data.get("title", ""), list(slide_data.get("bullets", []))
 

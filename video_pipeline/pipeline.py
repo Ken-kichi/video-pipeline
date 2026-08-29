@@ -46,6 +46,7 @@ from video_pipeline.config import (
     SCORE_THRESHOLD,
 )
 from video_pipeline.diagram_renderer import render_mermaid_diagram
+from video_pipeline.image_downloader import download_image
 from video_pipeline.image_generator import generate_slide_background
 from video_pipeline.io_utils import extract_h1_title, read_markdown, write_text_file
 from video_pipeline.slide_image_builder import build_slide_images
@@ -137,7 +138,12 @@ def _generate_slide_backgrounds(
 
 
 def _resolve_media_slides(
-    slides: list[dict], codes: list, diagrams: list, tables: list, media_dir: Path
+    slides: list[dict],
+    codes: list,
+    diagrams: list,
+    tables: list,
+    images: list,
+    media_dir: Path,
 ) -> list[dict]:
     """layoutが"code"/"diagram"/"table"のスライドについて、参照番号を実際の画像に解決する。
 
@@ -214,6 +220,30 @@ def _resolve_media_slides(
             )
             slide_data["table_image_path"] = str(path)
 
+        elif layout == "image":
+            ref = slide_data.get("image_ref")
+            block = (
+                images[ref] if isinstance(ref, int) and 0 <= ref < len(images) else None
+            )
+            if block is None:
+                print(
+                    f"  [警告] スライド{i + 1}のimage_ref={ref}が見つかりません。bulletsにフォールバックします。"
+                )
+                slide_data["layout"] = "bullets"
+                slide_data["bullets"] = [
+                    slide_data.get("caption") or "（画像の参照に失敗しました）"
+                ]
+                continue
+            path = download_image(block.url, media_dir / f"image_{i + 1}.png")
+            if path is None:
+                # ダウンロード失敗(URL切れ、ネットワーク不通など)。bulletsにフォールバックする
+                slide_data["layout"] = "bullets"
+                slide_data["bullets"] = [
+                    slide_data.get("caption") or "（画像のダウンロードに失敗しました）"
+                ]
+                continue
+            slide_data["article_image_path"] = str(path)
+
     return slides
 
 
@@ -232,12 +262,12 @@ def run_pipeline(
     )
     mention_article = MENTION_ARTICLE if mention_article is None else mention_article
 
-    codes, diagrams, tables = extract_article_assets(article_text)
-    asset_summary = summarize_for_prompt(codes, diagrams, tables)
-    if codes or diagrams or tables:
+    codes, diagrams, tables, images = extract_article_assets(article_text)
+    asset_summary = summarize_for_prompt(codes, diagrams, tables, images)
+    if codes or diagrams or tables or images:
         print(
             f"記事からコードブロック{len(codes)}個・mermaid図{len(diagrams)}個・"
-            f"表{len(tables)}個を抽出しました"
+            f"表{len(tables)}個・画像{len(images)}個を抽出しました"
         )
 
     print("=== 台本エージェント ===")
@@ -275,10 +305,10 @@ def run_pipeline(
 
     output_dir_path = Path(output_dir) / datetime.now().strftime("%Y%m%d_%H%M%S")
 
-    if codes or diagrams or tables:
-        print("=== 記事中のコード・図・表をスライドに反映 ===")
+    if codes or diagrams or tables or images:
+        print("=== 記事中のコード・図・表・画像をスライドに反映 ===")
         slides = _resolve_media_slides(
-            slides, codes, diagrams, tables, output_dir_path / "media"
+            slides, codes, diagrams, tables, images, output_dir_path / "media"
         )
 
     if generate_images:
