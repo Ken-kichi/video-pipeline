@@ -180,23 +180,44 @@ def append_overlay_stage(
 
     区間数がMAX_ENABLE_EXPR_TERMSを超える場合、1つのenable式に収まらず
     ffmpegの式パーサが失敗する(build_enable_expr参照)ため、区間を
-    MAX_ENABLE_EXPR_TERMS件ずつに分けて複数のoverlayフィルタにチェーンする
-    (同じ画像レイヤーを複数のoverlayから参照しても、ffmpegが自動的に
-    出力を分岐してくれるためsplitフィルタは不要)。各チャンクの区間は
-    互いに重ならないため、順番に適用しても1つの式で表現した場合と
-    同じ結果になる。
+    MAX_ENABLE_EXPR_TERMS件ずつに分けて複数のoverlayフィルタにチェーンする。
+    各チャンクの区間は互いに重ならないため、順番に適用しても1つの式で
+    表現した場合と同じ結果になる。
+
+    注意(重要): チェーンする段が2つ以上になる場合、layer_labelを明示的に
+    splitフィルタで複製してから各overlay段に渡す。同じラベルを複数の
+    overlayから参照してもffmpegの構文上はエラーにならず暗黙に分岐して
+    くれるが、-loop 1で読み込んだ静止画像(キャラクター立ち絵)をソースに
+    した場合、実際には2段目以降のoverlayが有効になった時点でキャラクター
+    ごと画面から消えてしまう不具合を実機の長尺動画で確認した(単純な
+    color合成のテストでは再現せず、実際のPNG+-loop 1構成でのみ再現した)。
+    splitで明示的に複製すれば発生しない。
 
     区間が1つも無ければfilter_stagesに何も追加せず、current_labelを
     そのまま返す(常に偽の式を1段追加するのと同じ結果になるが、
     フィルタ段を1つ節約できる)。
     """
+    if not intervals:
+        return current_label
+
+    chunks = [
+        intervals[i : i + MAX_ENABLE_EXPR_TERMS]
+        for i in range(0, len(intervals), MAX_ENABLE_EXPR_TERMS)
+    ]
+
+    if len(chunks) > 1:
+        source_labels = [f"{stage_label_prefix}src{i}" for i in range(len(chunks))]
+        split_outputs = "".join(f"[{label}]" for label in source_labels)
+        filter_stages.append(f"[{layer_label}]split={len(chunks)}{split_outputs}")
+    else:
+        source_labels = [layer_label]
+
     label = current_label
-    for i in range(0, len(intervals), MAX_ENABLE_EXPR_TERMS):
-        chunk = intervals[i : i + MAX_ENABLE_EXPR_TERMS]
+    for i, chunk in enumerate(chunks):
         enable_expr = build_enable_expr(chunk)
         out_label = f"{stage_label_prefix}{i}"
         filter_stages.append(
-            f"[{label}][{layer_label}]overlay=x={x_expr}:y={y_expr}:"
+            f"[{label}][{source_labels[i]}]overlay=x={x_expr}:y={y_expr}:"
             f"enable='{enable_expr}'[{out_label}]"
         )
         label = out_label
