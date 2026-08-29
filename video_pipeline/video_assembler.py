@@ -95,8 +95,17 @@ MIN_SLIDE_DURATION_SECONDS = 0.5
 # ように見えてしまう。常にごくわずかにズームさせることで、スライド自体の
 # 枚数を増やさなくても「画面が生きている」印象を持たせる。
 # ズームが強すぎると文字が読みにくくなる/わざとらしくなるため、控えめな値にする。
+#
+# ズーム“量”ではなく“速度”を固定にしている点に注意: 表示時間が長いスライド
+# (詳細解説パートなど、1シーンのセリフが長くスライド枚数が絞られている箇所)
+# で表示終了時点の倍率を固定値にすると、その固定量を長い秒数に薄く引き延ばす
+# ことになり、ズームがほぼ体感できないほど遅くなって「静止画になった」ように
+# 見える不具合が実際にあった(表示30秒超のスライドでズーム速度が8秒スライドの
+# 1/4以下になっていた)。速度を固定することで表示時間によらず同じ体感速度を保ち、
+# SLIDE_ZOOM_MAX_SCALEで長時間スライドでもズームしすぎない上限を設ける。
 SLIDE_ZOOM_ENABLED = True
-SLIDE_ZOOM_END_SCALE = 1.06  # 表示終了時点でのズーム倍率(1.0=無ズーム)
+SLIDE_ZOOM_RATE_PER_SECOND = 0.006  # 1秒あたりのズーム倍率増加量(0.6%/秒)
+SLIDE_ZOOM_MAX_SCALE = 1.15  # 表示時間がどれだけ長くても、これ以上はズームしない
 # zoompanフィルタは入力解像度が低いとガタつくため、いったん高解像度に
 # アップスケールしてからズーム・最終解像度へダウンスケールする
 _ZOOM_UPSCALE_FACTOR = 2
@@ -667,22 +676,29 @@ def _render_zoom_clip(
     duration: float,
     output_path: Path,
     fps: int = VIDEO_FPS,
-    zoom_end_scale: float = SLIDE_ZOOM_END_SCALE,
+    zoom_rate_per_second: float = SLIDE_ZOOM_RATE_PER_SECOND,
+    zoom_max_scale: float = SLIDE_ZOOM_MAX_SCALE,
 ) -> Path:
     """1枚の静止画から、ゆっくりズームインするKen Burns風の短い動画クリップを作る。
 
     zoompanフィルタは経験上「フレーム数(d)」基準で動くため、指定秒数分
     より少し多めのフレームを生成させ、最後に-tで正確な秒数に切り詰める
     (端数フレームでのズーム量の誤差より、秒数の正確さを優先する)。
+
+    ズーム速度(1秒あたりの倍率増加量)を固定し、表示終了時点の倍率は
+    duration*zoom_rate_per_secondから逆算する(zoom_max_scaleで頭打ち)。
+    表示終了倍率を固定してしまうと、表示時間が長いスライドほど同じ量を
+    薄く引き延ばすことになりズームがほぼ止まって見えるため。
     """
     frame_count = max(1, round(duration * fps)) + fps  # 余裕を持って多めに生成
-    zoom_increment = (zoom_end_scale - 1.0) / max(1, round(duration * fps))
+    zoom_end_scale = min(zoom_max_scale, 1.0 + zoom_rate_per_second * duration)
+    zoom_increment = zoom_rate_per_second / fps
     upscale_w = VIDEO_WIDTH * _ZOOM_UPSCALE_FACTOR
     upscale_h = VIDEO_HEIGHT * _ZOOM_UPSCALE_FACTOR
     zoompan_filter = (
         f"scale={upscale_w}:{upscale_h}:force_original_aspect_ratio=increase,"
         f"crop={upscale_w}:{upscale_h},"
-        f"zoompan=z='min(zoom+{zoom_increment:.8f},{zoom_end_scale})':"
+        f"zoompan=z='min(zoom+{zoom_increment:.8f},{zoom_end_scale:.6f})':"
         f"d={frame_count}:s={VIDEO_WIDTH}x{VIDEO_HEIGHT}:fps={fps}"
     )
     _run_ffmpeg(
