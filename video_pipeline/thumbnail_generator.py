@@ -1,15 +1,26 @@
 """動画のサムネイル(16:9, 1280x720)を生成する。
 
-2つの生成方法がある:
-- generate_thumbnail_with_gemini(): Geminiに背景・イラスト・文字を丸ごと
-  生成させる(推奨。文字と背景を一体で描くため、テキストとイラストの
-  レイアウトが自然に噛み合う)。文字精度が重要なので、通常のスライド背景
-  よりも高精度な GEMINI_THUMBNAIL_MODEL を使う
-- build_thumbnail(): Pillowでテキスト・キャラクター立ち絵を個別に重ねて
-  描く方式(GEMINI_API_KEY未設定時のフォールバック)。この方式は、背景の
-  絵柄やレイアウトを考慮せず固定位置に要素を重ねるだけなので、キャラクターと
-  文字が重なる不具合が実際に起きたことがある。文字を画面上部、キャラクターを
-  下部に固定して重ならないようにしている
+生成方法は1段階(デフォルト)と2段階(--pillow-compositeで明示指定時)がある:
+- generate_thumbnail_with_gemini() (デフォルト): Geminiに背景・キャラクター・
+  文字を1回で丸ごと生成させる。キャラクター立ち絵を参照画像として渡す
+  image-to-imageのため、内容に応じたポーズ・表情の作り込みが最も自然に
+  仕上がる(=このチャンネルにとって「アイコン」より重要な要素)。ただし
+  「参照画像に忠実に」とだけ指示すると、Geminiがポーズ・表情まで含めて
+  立ち絵をそのまま複製してしまい、毎回ほぼ同じ「口を開けただけの直立
+  ポーズ」になる不具合が実際の生成結果で確認されたため、
+  _character_reference_instruction()では「キャラクターとしての同一性
+  (髪型・服装・配色・線画タッチ)は保つが、ポーズ・表情は内容に合わせて
+  毎回描き直してよい」と明示している。同じ参照画像アンカリングの影響で、
+  「内容を象徴するアイコンも入れる」を必須(REQUIRED)にしても毎回無視
+  されることも確認済みなので、アイコンは任意の副次要素にとどめている
+- generate_thumbnail_background() + build_thumbnail() (--pillow-composite
+  指定時): Geminiに「文字・キャラクターなしの背景+アイコン1つ」だけを
+  生成させ(参照画像を渡さないtext-to-imageなので指示に従いやすい)、
+  その上にPillowで文字と*固定ポーズの*キャラクター立ち絵を重ねる。
+  アイコンは安定して出るが、キャラクターの表情・ポーズは内容に関わらず
+  常に同じになるため、通常はgenerate_thumbnail_with_gemini()の方が向く
+- build_thumbnail()単体: 上記のいずれのGemini呼び出しも行わない/失敗した
+  場合のフォールバック(グラデーション背景+文字+キャラクター)
 """
 
 from pathlib import Path
@@ -69,18 +80,17 @@ GEMINI_THUMBNAIL_STYLE = (
     "outline/contrast so it reads instantly even at a tiny preview size. "
     "Include the show's mascot character(s) when reference image(s) are "
     "provided (see instructions below) — do not depict any other human face "
-    "or invented character. "
-    "REQUIRED: you must also draw ONE small, simple symbolic icon or "
+    "or invented character. The mascot's pose and expression (see "
+    "instructions below) is the main way the thumbnail should communicate "
+    "the content's emotional hook, so prioritize getting that right. "
+    "Optionally, you may also add ONE small, simple symbolic icon or "
     "pictogram (e.g. a warning triangle, a cracked/shattered gauge or meter, "
-    "a before-after arrow, a checkmark vs. cross) that visually represents "
-    "the core tension described in the content summary below — this is not "
-    "optional decoration, it is what makes the topic instantly graspable at "
-    "a glance. Place it in otherwise-empty background space (for example a "
-    "corner, or between the headline and the mascot(s)) so it does not "
-    "overlap the headline text or the mascot(s), and keep it small enough "
-    "to read as one accent rather than a second focal point. If there is no "
-    "mascot reference image, that one icon/pictogram becomes the sole "
-    "supporting visual instead. "
+    "a before-after arrow, a checkmark vs. cross) if it reinforces the "
+    "content without cluttering the frame. Place it in otherwise-empty "
+    "background space so it does not overlap the headline text or the "
+    "mascot(s), and keep it small enough to read as one accent rather than "
+    "a second focal point. If there is no mascot reference image, that one "
+    "icon/pictogram becomes the sole supporting visual instead. "
     "Do NOT create multiple side-by-side panels, comparison boxes, "
     "flowcharts, or diagrams with several small labels — that reads as a "
     "slide, not a thumbnail, and becomes illegible at small preview sizes. "
@@ -94,6 +104,54 @@ GEMINI_THUMBNAIL_STYLE = (
     "punchy, uncluttered. "
     "No watermarks, no logos, no borders."
 )
+
+
+# build_thumbnail()は文字を画面上部、キャラクターを左右端下部に固定配置
+# するため、中央下寄りの領域が常に空く。アイコンをそこに置くよう明示することで、
+# 後からPillowで重ねる文字・キャラクターと衝突しないようにしている。
+ICON_BACKGROUND_STYLE = (
+    "Design a bold, high-contrast YouTube thumbnail background image, 16:9 "
+    "aspect ratio. This will have text and character illustrations added on "
+    "top of it afterward by a separate process, so the image itself must "
+    "contain ABSOLUTELY NO text, letters, numbers, words, or writing of any "
+    "kind, and NO people, characters, faces, watermarks, or logos — "
+    "background and icon only. "
+    "Use a single bold, saturated background color (e.g. vivid orange, "
+    "yellow, red, deep black, or navy — vary it to fit the content rather "
+    "than always the same color), not a busy or photorealistic backdrop. "
+    "In the lower-center area of the frame, draw ONE simple, bold, flat "
+    "icon or pictogram that visually represents the core tension described "
+    "below (good icon types: a warning triangle with an exclamation mark, "
+    "a cracked/shattered gauge or meter, a before-after arrow, a checkmark "
+    "versus a cross) — large enough to read instantly at a glance, flat "
+    "and simple, not a complex diagram or infographic with labels. "
+    "Leave the top third of the frame, and the far left/right edges, as "
+    "plain uncluttered background color, since those areas will be covered "
+    "by the headline text and character illustrations. "
+    "Professional, punchy, uncluttered. No borders."
+)
+
+
+def build_thumbnail_icon_background_prompt(visual_summary: str) -> str:
+    """サムネイル背景+アイコンだけを生成させるためのプロンプトを組み立てる。"""
+    return (
+        f"{ICON_BACKGROUND_STYLE} "
+        f"The icon should represent this concept: {visual_summary}"
+    )
+
+
+def generate_thumbnail_background(
+    visual_summary: str, output_path: str | Path
+) -> Path | None:
+    """内容を象徴するアイコン入りのサムネイル背景を生成する。失敗時はNoneを返す。
+
+    参照画像を渡さないtext-to-image生成のため、generate_thumbnail_with_gemini()
+    と違ってキャラクター再現に構図を引っ張られず、アイコンの指示に従いやすい。
+    """
+    from video_pipeline.image_generator import generate_slide_image
+
+    prompt = build_thumbnail_icon_background_prompt(visual_summary)
+    return generate_slide_image(prompt, output_path, aspect_ratio="16:9")
 
 
 def _load_font(size: int) -> ImageFont.FreeTypeFont:
@@ -146,18 +204,36 @@ def _cover_resize_crop(
     return resized.crop((left, top, left + target_width, top + target_height))
 
 
-def _character_reference_instruction(speakers: list[str]) -> str:
-    """参照画像として渡すキャラクター立ち絵をどう扱うべきかの指示文を作る。"""
+def _character_reference_instruction(speakers: list[str], visual_summary: str = "") -> str:
+    """参照画像として渡すキャラクター立ち絵をどう扱うべきかの指示文を作る。
+
+    以前は「参照画像に忠実に」とだけ指示していたところ、Geminiが立ち絵の
+    ポーズ・表情までそのまま複製してしまい、毎回ほぼ同じ「口を開けただけの
+    直立ポーズ」になる問題が実際の生成結果で確認された。そこで、保つべき
+    なのはキャラクターとしての同一性(髪型・髪色・服装・配色・線画タッチ)
+    だけであり、ポーズ・表情・向きは動画の内容に合わせて毎回自由に描き
+    直してよい(むしろ描き直すべき)ことを明示する指示に変更した。
+    """
     names = " and ".join(CHARACTER_EN_NAMES.get(s, s) for s in speakers)
-    return (
+    instruction = (
         f"The attached reference image(s) show this show's mascot character(s), "
-        f"{names} — use them as the thumbnail's supporting visual. Keep their "
-        f"exact design, colors, and line-art style faithful to the reference "
-        f"image(s); do not redesign, reinterpret, or replace them with a "
-        f"different character or a human face. Place them at the bottom of the "
-        f"frame reacting expressively to the headline, positioned so they do "
-        f"not overlap or cover the headline text."
+        f"{names}. Preserve their identity — same hair color/style, same "
+        f"outfit, same color palette, same line-art style — but do NOT simply "
+        f"copy the reference image's neutral standing pose and expression. "
+        f"Redraw them in a new, dramatic pose, facial expression, and body "
+        f"orientation that specifically and vividly reacts to this video's "
+        f"content"
     )
+    if visual_summary:
+        instruction += f" ({visual_summary})"
+    instruction += (
+        ", for example: wide-eyed shock with both hands on their cheeks, "
+        "urgently pointing at something, recoiling with cold sweat, or a "
+        "triumphant fist pump — whichever emotion actually fits the content. "
+        "Do not depict a different character or a human face. Position them "
+        "so they do not overlap or cover the headline text."
+    )
+    return instruction
 
 
 def build_gemini_thumbnail_prompt(
@@ -190,10 +266,10 @@ def build_gemini_thumbnail_prompt(
         )
     if visual_summary:
         lines.append(
-            f"Content summary (for context only, to help you choose the ONE "
-            f"small symbolic icon described below — do not try to depict all "
-            f"of this in the image, and do not use it to add extra text): "
-            f"{visual_summary}"
+            f"Content summary (for context only — use it to decide the "
+            f"mascot character(s)' pose/expression below, and optionally one "
+            f"small supporting icon; do not try to depict all of this in the "
+            f"image, and do not use it to add extra text): {visual_summary}"
         )
     lines.append(
         "Do not misspell, translate, or alter the given headline/subheading text. "
@@ -201,7 +277,7 @@ def build_gemini_thumbnail_prompt(
     )
     lines.append(GEMINI_THUMBNAIL_STYLE)
     if character_speakers:
-        lines.append(_character_reference_instruction(character_speakers))
+        lines.append(_character_reference_instruction(character_speakers, visual_summary))
     return " ".join(lines)
 
 

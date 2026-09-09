@@ -5,13 +5,16 @@
 無駄に動かさずに済むよう、この専用コマンドに分離している
 (呼び出すエージェントはthumbnail_agentのみ。単発のClaude API呼び出し1回)。
 
-画像生成は2段階のフォールバック構成になっている:
-  1. GEMINI_API_KEYが使えれば、Geminiに背景・文字を丸ごと生成させる
-     (推奨。文字と背景が一体で描かれるため、Pillowで別々に重ねる方式より
-     レイアウトが自然になる。実際に、キャラクター立ち絵とPillow描画の
-     文字が重なってしまう不具合が起きたことがある)
-  2. Geminiが使えない/失敗した場合は、Pillowでテキスト・キャラクター立ち絵
-     (あれば)を個別に重ねて描く(build_thumbnail)
+画像生成は既定でGeminiに背景・キャラクター・文字を1回で丸ごと生成させる
+(generate_thumbnail_with_gemini。詳細はthumbnail_generator.pyのモジュール
+docstringを参照)。キャラクターのポーズ・表情を動画の内容に合わせて
+描き直せるのが利点。
+  --pillow-compositeを指定すると、Geminiには背景+アイコンだけを生成させ
+  (generate_thumbnail_background)、文字と*固定ポーズの*キャラクター立ち絵は
+  Pillowで重ねる方式(build_thumbnail)に切り替わる。アイコンは安定して
+  出るが、キャラクターの表情は内容に関わらず常に同じになる。
+  Geminiが使えない/失敗した場合は、いずれの方式でもグラデーション背景で
+  build_thumbnailのみ実行するフォールバックになる
 
 使い方:
   uv run generate-thumbnail --script output/20260731_153000/script.md
@@ -25,11 +28,11 @@ from dotenv import load_dotenv
 
 from video_pipeline.agents import thumbnail_agent
 from video_pipeline.config import GENERATE_SLIDE_IMAGES
-from video_pipeline.image_generator import generate_slide_background
 from video_pipeline.interactive import confirm, pick_output_run
 from video_pipeline.io_utils import extract_youtube_title
 from video_pipeline.thumbnail_generator import (
     build_thumbnail,
+    generate_thumbnail_background,
     generate_thumbnail_with_gemini,
 )
 
@@ -57,10 +60,12 @@ def main() -> None:
         help="Gemini(GEMINI_API_KEY必須)で背景・文字を丸ごと生成する。未指定なら対話的に選べる",
     )
     parser.add_argument(
-        "--no-gemini-fulltext",
+        "--pillow-composite",
         action="store_true",
-        help="Geminiを使う場合でも、文字はGeminiに焼き込ませずPillowで別途重ねる"
-        "(従来方式。Geminiの文字精度に不安がある場合向け)",
+        help="Geminiには背景+アイコンだけを生成させ、文字と固定ポーズの"
+        "キャラクター立ち絵はPillowで重ねる方式を使う(デフォルトは、"
+        "Geminiに背景・キャラクター・文字を1回で丸ごと生成させ、"
+        "キャラクターのポーズ・表情も内容に合わせて描き直させる方式)",
     )
     args = parser.parse_args()
 
@@ -106,7 +111,7 @@ def main() -> None:
     print(f"  visual_summary: {thumbnail_copy['visual_summary']}")
 
     thumbnail_path = None
-    if generate_images and not args.no_gemini_fulltext:
+    if generate_images and not args.pillow_composite:
         print("=== Geminiでサムネイルを丸ごと生成中 ===")
         thumbnail_path = generate_thumbnail_with_gemini(
             thumbnail_copy["main_text"],
@@ -122,9 +127,9 @@ def main() -> None:
     if thumbnail_path is None:
         background_path = None
         if generate_images:
-            print("=== 背景イラストを生成中(Gemini) ===")
-            background_path = generate_slide_background(
-                f"a wide 16:9 abstract illustration representing: {thumbnail_copy['main_text']}",
+            print("=== 背景+アイコンを生成中(Gemini) ===")
+            background_path = generate_thumbnail_background(
+                thumbnail_copy["visual_summary"] or thumbnail_copy["main_text"],
                 output_path.parent / "thumbnail_background.png",
             )
         thumbnail_path = build_thumbnail(
