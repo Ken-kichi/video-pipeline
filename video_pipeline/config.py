@@ -64,6 +64,12 @@ ZUNDAMON_ILLUSTRATOR_CREDIT = os.environ.get(
     "ZUNDAMON_ILLUSTRATOR_CREDIT", "坂本アヒル 様"
 )
 
+# チャンネル登録導線用のチャンネルURL。動画ごとに変わらない固定値なので、
+# LLMに書かせず概要欄に決定的に付け足す(実在しないURLの創作を避けるため)。
+CHANNEL_URL = os.environ.get(
+    "CHANNEL_URL", "https://www.youtube.com/channel/UCc9QZS9y-NknFMxPQp5egtg"
+)
+
 # 概要欄に元記事を紹介し、動画の最後でも「概要欄の元記事を見てほしい」と
 # 案内するかどうか。元記事を用意していない回はCLIの --no-mention-article か
 # 環境変数 MENTION_ARTICLE=0 で無効化できる。

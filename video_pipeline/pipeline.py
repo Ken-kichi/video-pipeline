@@ -305,6 +305,7 @@ def run_pipeline(
     description = (
         f"【YouTubeタイトル】\n{video_title}\n\n"
         f"{description}\n\n"
+        f"{description_agent.build_subscribe_block()}\n\n"
         f"{description_agent.build_credits_block()}"
     )
 

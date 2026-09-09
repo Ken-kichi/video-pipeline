@@ -9,12 +9,17 @@
 - （任意）使用技術・ライブラリ
 - （include_article_link有効時のみ）元記事(Zenn/note等)のURLを貼る行
 - 関連ハッシュタグ
+- 関連動画（ショート版）とチャンネル登録導線（LLM生成ではなく決定的に付け足す。
+  チャンネルURLは動画ごとに変わらない固定値なので、実在しないURLの創作を
+  避けるためLLMには書かせない。ショート版URLはこの時点ではまだ存在しない
+  ためプレースホルダーになる）
 - VOICEVOX/立ち絵のクレジット（LLM生成ではなく決定的に付け足す。利用規約上
   必須の表記なので、LLMに書かせて表現を変えられたり抜け落ちたりしないようにする）
 """
 
 from video_pipeline.claude_client import call_text, call_json
 from video_pipeline.config import (
+    CHANNEL_URL,
     MODEL_EVALUATE,
     MODEL_GENERATE,
     TSUMUGI_ILLUSTRATOR_CREDIT,
@@ -113,6 +118,21 @@ def build_credits_block(
         "VOICEVOX:ずんだもん\n"
         f"つむぎ立ち絵: {tsumugi_illust}\n"
         f"ずんだもん立ち絵: {zundamon_illust}"
+    )
+
+
+def build_subscribe_block(channel_url: str = CHANNEL_URL) -> str:
+    """関連動画(ショート版)とチャンネル登録導線を決定的に生成する。
+
+    ショート版のURLは概要欄生成の時点ではまだアップロードされておらず
+    実在しないため、元記事URLと同じくプレースホルダーにする(人間が
+    投稿後に差し替える前提)。
+    """
+    return (
+        "▼ 関連動画\n"
+        "ショート版: （ここにショート動画のURLを貼ってください）\n\n"
+        "チャンネル登録はこちら\n"
+        f"{channel_url}?sub_confirmation=1"
     )
 
 
