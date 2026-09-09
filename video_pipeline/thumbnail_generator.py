@@ -1,26 +1,23 @@
 """動画のサムネイル(16:9, 1280x720)を生成する。
 
-生成方法は1段階(デフォルト)と2段階(--pillow-compositeで明示指定時)がある:
-- generate_thumbnail_with_gemini() (デフォルト): Geminiに背景・キャラクター・
+2つの生成方法がある:
+- generate_thumbnail_with_gemini() (推奨): Geminiに背景・キャラクター・
   文字を1回で丸ごと生成させる。キャラクター立ち絵を参照画像として渡す
   image-to-imageのため、内容に応じたポーズ・表情の作り込みが最も自然に
-  仕上がる(=このチャンネルにとって「アイコン」より重要な要素)。ただし
-  「参照画像に忠実に」とだけ指示すると、Geminiがポーズ・表情まで含めて
-  立ち絵をそのまま複製してしまい、毎回ほぼ同じ「口を開けただけの直立
-  ポーズ」になる不具合が実際の生成結果で確認されたため、
+  仕上がる。ただし「参照画像に忠実に」とだけ指示すると、Geminiがポーズ・
+  表情まで含めて立ち絵をそのまま複製してしまい、毎回ほぼ同じ「口を開けた
+  だけの直立ポーズ」になる不具合が実際の生成結果で確認されたため、
   _character_reference_instruction()では「キャラクターとしての同一性
   (髪型・服装・配色・線画タッチ)は保つが、ポーズ・表情は内容に合わせて
-  毎回描き直してよい」と明示している。同じ参照画像アンカリングの影響で、
-  「内容を象徴するアイコンも入れる」を必須(REQUIRED)にしても毎回無視
-  されることも確認済みなので、アイコンは任意の副次要素にとどめている
-- generate_thumbnail_background() + build_thumbnail() (--pillow-composite
-  指定時): Geminiに「文字・キャラクターなしの背景+アイコン1つ」だけを
-  生成させ(参照画像を渡さないtext-to-imageなので指示に従いやすい)、
-  その上にPillowで文字と*固定ポーズの*キャラクター立ち絵を重ねる。
-  アイコンは安定して出るが、キャラクターの表情・ポーズは内容に関わらず
-  常に同じになるため、通常はgenerate_thumbnail_with_gemini()の方が向く
-- build_thumbnail()単体: 上記のいずれのGemini呼び出しも行わない/失敗した
-  場合のフォールバック(グラデーション背景+文字+キャラクター)
+  毎回描き直してよい」と明示している。
+  一時期、内容を象徴するアイコン/ピクトグラムを添える指示も試したが、
+  無理に図形を足すと不自然になる・キャラクターの表現だけで十分伝わる、
+  という判断で撤回した。GEMINI_THUMBNAIL_STYLEにアイコン関連の指示を
+  追加しないこと
+- build_thumbnail(): Pillowでテキスト・キャラクター立ち絵を個別に重ねて
+  描く方式(GEMINI_API_KEY未設定時、またはgenerate_thumbnail_with_gemini()
+  失敗時のフォールバック)。固定位置に重ねるだけなので、キャラクターの
+  ポーズ・表情は内容に関わらず常に同じになる
 """
 
 from pathlib import Path
@@ -64,12 +61,11 @@ TEXT_TOP_MARGIN = 50
 #
 # その後、「キャラクター立ち絵はいつも同じ構図の代わり映えしない見た目に
 # なりがちで、内容の核心(過信・見逃しのような課題感)が伝わらない」という
-# フィードバックを受けた。参照画像を渡すと毎回キャラクターだけが補助要素に
-# 選ばれてしまい、visual_summaryに書いた対比・数値がアイコンとして全く
-# 反映されない問題があったため、「キャラクター」と「内容を象徴する小さな
-# シンボル(警告マーク・壊れたメーターなど)」を両方置ける余地を追加した。
-# ただし前述の「情報過多で読めなくなる」失敗を繰り返さないよう、シンボルは
-# あくまで1つ・小さく・文字やキャラクターと重ならない位置に限定している。
+# フィードバックを受け、内容を象徴するアイコン/ピクトグラムを追加する指示を
+# 一時的に試した。しかし「無理にアイコンを入れないでほしい」という指摘を
+# 受けて撤回している。キャラクターのポーズ・表情(下記の
+# _character_reference_instruction()参照)だけで内容の核心を伝える方針とし、
+# ここにアイコン関連の指示を戻さないこと。
 GEMINI_THUMBNAIL_STYLE = (
     "YouTube thumbnail design, 16:9 aspect ratio. This must look like a real, "
     "high click-through-rate YouTube thumbnail — NOT a slide, infographic, or "
@@ -81,16 +77,14 @@ GEMINI_THUMBNAIL_STYLE = (
     "Include the show's mascot character(s) when reference image(s) are "
     "provided (see instructions below) — do not depict any other human face "
     "or invented character. The mascot's pose and expression (see "
-    "instructions below) is the main way the thumbnail should communicate "
-    "the content's emotional hook, so prioritize getting that right. "
-    "Optionally, you may also add ONE small, simple symbolic icon or "
-    "pictogram (e.g. a warning triangle, a cracked/shattered gauge or meter, "
-    "a before-after arrow, a checkmark vs. cross) if it reinforces the "
-    "content without cluttering the frame. Place it in otherwise-empty "
-    "background space so it does not overlap the headline text or the "
-    "mascot(s), and keep it small enough to read as one accent rather than "
-    "a second focal point. If there is no mascot reference image, that one "
-    "icon/pictogram becomes the sole supporting visual instead. "
+    "instructions below) is the main — and only — supporting visual: it is "
+    "how the thumbnail should communicate the content's emotional hook, so "
+    "prioritize getting that right. Do not add any separate icon, symbol, "
+    "pictogram, or graphic diagram alongside the mascot(s) — a forced extra "
+    "graphic tends to look unnatural and clutters the frame; the "
+    "character's pose and expression alone should carry the content's "
+    "meaning. If there is no mascot reference image, keep the background "
+    "itself simple with no added icon either. "
     "Do NOT create multiple side-by-side panels, comparison boxes, "
     "flowcharts, or diagrams with several small labels — that reads as a "
     "slide, not a thumbnail, and becomes illegible at small preview sizes. "
@@ -104,54 +98,6 @@ GEMINI_THUMBNAIL_STYLE = (
     "punchy, uncluttered. "
     "No watermarks, no logos, no borders."
 )
-
-
-# build_thumbnail()は文字を画面上部、キャラクターを左右端下部に固定配置
-# するため、中央下寄りの領域が常に空く。アイコンをそこに置くよう明示することで、
-# 後からPillowで重ねる文字・キャラクターと衝突しないようにしている。
-ICON_BACKGROUND_STYLE = (
-    "Design a bold, high-contrast YouTube thumbnail background image, 16:9 "
-    "aspect ratio. This will have text and character illustrations added on "
-    "top of it afterward by a separate process, so the image itself must "
-    "contain ABSOLUTELY NO text, letters, numbers, words, or writing of any "
-    "kind, and NO people, characters, faces, watermarks, or logos — "
-    "background and icon only. "
-    "Use a single bold, saturated background color (e.g. vivid orange, "
-    "yellow, red, deep black, or navy — vary it to fit the content rather "
-    "than always the same color), not a busy or photorealistic backdrop. "
-    "In the lower-center area of the frame, draw ONE simple, bold, flat "
-    "icon or pictogram that visually represents the core tension described "
-    "below (good icon types: a warning triangle with an exclamation mark, "
-    "a cracked/shattered gauge or meter, a before-after arrow, a checkmark "
-    "versus a cross) — large enough to read instantly at a glance, flat "
-    "and simple, not a complex diagram or infographic with labels. "
-    "Leave the top third of the frame, and the far left/right edges, as "
-    "plain uncluttered background color, since those areas will be covered "
-    "by the headline text and character illustrations. "
-    "Professional, punchy, uncluttered. No borders."
-)
-
-
-def build_thumbnail_icon_background_prompt(visual_summary: str) -> str:
-    """サムネイル背景+アイコンだけを生成させるためのプロンプトを組み立てる。"""
-    return (
-        f"{ICON_BACKGROUND_STYLE} "
-        f"The icon should represent this concept: {visual_summary}"
-    )
-
-
-def generate_thumbnail_background(
-    visual_summary: str, output_path: str | Path
-) -> Path | None:
-    """内容を象徴するアイコン入りのサムネイル背景を生成する。失敗時はNoneを返す。
-
-    参照画像を渡さないtext-to-image生成のため、generate_thumbnail_with_gemini()
-    と違ってキャラクター再現に構図を引っ張られず、アイコンの指示に従いやすい。
-    """
-    from video_pipeline.image_generator import generate_slide_image
-
-    prompt = build_thumbnail_icon_background_prompt(visual_summary)
-    return generate_slide_image(prompt, output_path, aspect_ratio="16:9")
 
 
 def _load_font(size: int) -> ImageFont.FreeTypeFont:

@@ -9,12 +9,8 @@
 (generate_thumbnail_with_gemini。詳細はthumbnail_generator.pyのモジュール
 docstringを参照)。キャラクターのポーズ・表情を動画の内容に合わせて
 描き直せるのが利点。
-  --pillow-compositeを指定すると、Geminiには背景+アイコンだけを生成させ
-  (generate_thumbnail_background)、文字と*固定ポーズの*キャラクター立ち絵は
-  Pillowで重ねる方式(build_thumbnail)に切り替わる。アイコンは安定して
-  出るが、キャラクターの表情は内容に関わらず常に同じになる。
-  Geminiが使えない/失敗した場合は、いずれの方式でもグラデーション背景で
-  build_thumbnailのみ実行するフォールバックになる
+  Geminiが使えない/失敗した場合は、グラデーション背景でbuild_thumbnail
+  のみ実行するフォールバックになる
 
 使い方:
   uv run generate-thumbnail --script output/20260731_153000/script.md
@@ -30,11 +26,7 @@ from video_pipeline.agents import thumbnail_agent
 from video_pipeline.config import GENERATE_SLIDE_IMAGES
 from video_pipeline.interactive import confirm, pick_output_run
 from video_pipeline.io_utils import extract_youtube_title
-from video_pipeline.thumbnail_generator import (
-    build_thumbnail,
-    generate_thumbnail_background,
-    generate_thumbnail_with_gemini,
-)
+from video_pipeline.thumbnail_generator import build_thumbnail, generate_thumbnail_with_gemini
 
 
 def main() -> None:
@@ -58,14 +50,6 @@ def main() -> None:
         action="store_true",
         default=None,
         help="Gemini(GEMINI_API_KEY必須)で背景・文字を丸ごと生成する。未指定なら対話的に選べる",
-    )
-    parser.add_argument(
-        "--pillow-composite",
-        action="store_true",
-        help="Geminiには背景+アイコンだけを生成させ、文字と固定ポーズの"
-        "キャラクター立ち絵はPillowで重ねる方式を使う(デフォルトは、"
-        "Geminiに背景・キャラクター・文字を1回で丸ごと生成させ、"
-        "キャラクターのポーズ・表情も内容に合わせて描き直させる方式)",
     )
     args = parser.parse_args()
 
@@ -111,7 +95,7 @@ def main() -> None:
     print(f"  visual_summary: {thumbnail_copy['visual_summary']}")
 
     thumbnail_path = None
-    if generate_images and not args.pillow_composite:
+    if generate_images:
         print("=== Geminiでサムネイルを丸ごと生成中 ===")
         thumbnail_path = generate_thumbnail_with_gemini(
             thumbnail_copy["main_text"],
@@ -125,18 +109,10 @@ def main() -> None:
             )
 
     if thumbnail_path is None:
-        background_path = None
-        if generate_images:
-            print("=== 背景+アイコンを生成中(Gemini) ===")
-            background_path = generate_thumbnail_background(
-                thumbnail_copy["visual_summary"] or thumbnail_copy["main_text"],
-                output_path.parent / "thumbnail_background.png",
-            )
         thumbnail_path = build_thumbnail(
             thumbnail_copy["main_text"],
             thumbnail_copy["sub_text"],
             output_path,
-            background_path=background_path,
         )
 
     print(f"\n完了: {thumbnail_path}")
