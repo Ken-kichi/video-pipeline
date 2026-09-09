@@ -50,26 +50,43 @@ TEXT_TOP_MARGIN = 50
 # (2)視覚要素は写真1枚・イラスト1体・単純な図形1つのいずれかに絞られている
 # (3)補助的な要素があっても「Ai」アイコンのような小さいバッジ程度、という
 # 3点だったため、これも指示に反映している。
+#
+# その後、「キャラクター立ち絵はいつも同じ構図の代わり映えしない見た目に
+# なりがちで、内容の核心(過信・見逃しのような課題感)が伝わらない」という
+# フィードバックを受けた。参照画像を渡すと毎回キャラクターだけが補助要素に
+# 選ばれてしまい、visual_summaryに書いた対比・数値がアイコンとして全く
+# 反映されない問題があったため、「キャラクター」と「内容を象徴する小さな
+# シンボル(警告マーク・壊れたメーターなど)」を両方置ける余地を追加した。
+# ただし前述の「情報過多で読めなくなる」失敗を繰り返さないよう、シンボルは
+# あくまで1つ・小さく・文字やキャラクターと重ならない位置に限定している。
 GEMINI_THUMBNAIL_STYLE = (
     "YouTube thumbnail design, 16:9 aspect ratio. This must look like a real, "
     "high click-through-rate YouTube thumbnail — NOT a slide, infographic, or "
     "diagram. It will typically be viewed at a tiny size (roughly 120-350px "
-    "wide) while scrolling, so it needs an extremely simple composition with "
-    "exactly ONE clear focal point. "
+    "wide) while scrolling, so it needs an extremely simple composition. "
     "The headline text is the most important element: render it huge, bold, "
     "and ultra-legible, filling a large portion of the frame, with strong "
     "outline/contrast so it reads instantly even at a tiny preview size. "
-    "You may add at most ONE simple, bold supporting visual that reinforces "
-    "the headline's meaning — this should be the show's mascot character(s) "
-    "when reference image(s) are provided (see instructions below), or "
-    "otherwise one simple icon/symbol/before-after visual. Do not depict any "
-    "other human face or invented character. Do NOT create multiple "
-    "side-by-side panels, comparison boxes, flowcharts, or diagrams with "
-    "several small labels — that reads as a slide, not a thumbnail, and "
-    "becomes illegible at small preview sizes. Do not add any supporting "
-    "text beyond the given headline/subheading, other than optionally one "
-    "tiny badge-style label in a corner (a short 1-4 character tag, like a "
-    "small icon chip) if it fits the theme. "
+    "Include the show's mascot character(s) when reference image(s) are "
+    "provided (see instructions below) — do not depict any other human face "
+    "or invented character. "
+    "REQUIRED: you must also draw ONE small, simple symbolic icon or "
+    "pictogram (e.g. a warning triangle, a cracked/shattered gauge or meter, "
+    "a before-after arrow, a checkmark vs. cross) that visually represents "
+    "the core tension described in the content summary below — this is not "
+    "optional decoration, it is what makes the topic instantly graspable at "
+    "a glance. Place it in otherwise-empty background space (for example a "
+    "corner, or between the headline and the mascot(s)) so it does not "
+    "overlap the headline text or the mascot(s), and keep it small enough "
+    "to read as one accent rather than a second focal point. If there is no "
+    "mascot reference image, that one icon/pictogram becomes the sole "
+    "supporting visual instead. "
+    "Do NOT create multiple side-by-side panels, comparison boxes, "
+    "flowcharts, or diagrams with several small labels — that reads as a "
+    "slide, not a thumbnail, and becomes illegible at small preview sizes. "
+    "Do not add any supporting text beyond the given headline/subheading, "
+    "other than optionally one tiny badge-style label in a corner (a short "
+    "1-4 character tag, like a small icon chip) if it fits the theme. "
     "Use a bold, saturated, high-contrast solid-color background (a single "
     "strong color such as vivid orange, yellow, deep black, or dark navy — "
     "vary it to fit the content rather than defaulting to dark navy every "
@@ -156,8 +173,8 @@ def build_gemini_thumbnail_prompt(
     渡し、比較図・アイコンなどの図解を自律的にデザインさせる指示に変えた
     ところ、今度は情報量が多すぎて逆にクリックされにくいサムネイルになって
     しまった(実際に生成された画像で確認された)。visual_summaryは「複数の
-    パネルを作る材料」ではなく「たった1つの視覚要素を選ぶための参考情報」
-    として使うよう明示している。
+    パネルを作る材料」ではなく「キャラクターに添える、たった1つの小さな
+    象徴アイコンを選ぶための参考情報」として使うよう明示している。
 
     character_speakers: 参照画像として一緒に渡すキャラクター(つむぎ/ずんだもん)
     の話者名リスト。指定すると、汎用的な人物の顔などではなく、この立ち絵を
@@ -173,8 +190,9 @@ def build_gemini_thumbnail_prompt(
         )
     if visual_summary:
         lines.append(
-            f"Content summary (for context only, to help you choose ONE simple "
-            f"supporting visual — do not try to depict all of this in the image): "
+            f"Content summary (for context only, to help you choose the ONE "
+            f"small symbolic icon described below — do not try to depict all "
+            f"of this in the image, and do not use it to add extra text): "
             f"{visual_summary}"
         )
     lines.append(
