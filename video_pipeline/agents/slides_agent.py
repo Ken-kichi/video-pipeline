@@ -43,9 +43,15 @@ NotebookLMのVideo Overviewのように、内容によってスライドのレ�
 - stat_valueは短く(20文字程度まで)。長い説明はstat_labelに書く
 
 ## layout: "quote"（1文のキーメッセージを強調したいスライド。例: まとめの核心）
-{"layout": "quote", "scene_number": 1, "quote_text": "データが8割、モデルが2割", "quote_context": "...", "notes": "...", "background_prompt": "..."}
+{"layout": "quote", "scene_number": 1, "quote_text": "データが8割、モデルが2割", "quote_context": "特徴量よりデータ収集に時間を割くべき", "notes": "...", "background_prompt": "..."}
 - quote_textは短く力強い1文(20文字前後が目安)
-- quote_contextは補足の一言(無ければ空文字)
+- quote_contextは、quote_textの内容を補強・具体化する視聴者向けの
+  実際の一言(無ければ空文字)。このスライドが動画内で果たす役割を
+  説明するメタな注釈(悪い例:「動画イントロ：再学習不要のAIエージェントへ」
+  「まとめパート：〜」)には絶対にしない。これはスライド制作者向けの
+  説明であって視聴者に見せる意味のある文ではなく、そのままショート動画の
+  字幕としても使われるため、内容そのものを書く(良い例:「たった1つの
+  工夫で対応できる」)
 
 ## layout: "comparison"（2つの対象を対比させたいスライド。例: 汎用AI vs 自前モデル）
 {"layout": "comparison", "scene_number": 1, "title": "...", "left_label": "...", "left_bullets": ["...", "..."], "right_label": "...", "right_bullets": ["...", "..."], "notes": "...", "background_prompt": "..."}
@@ -172,6 +178,10 @@ EVALUATE_SYSTEM = """あなたはスライド構成のレビュアーです。�
   無理に使っていないか、逆に強調すべき数値やキーメッセージがbulletsに埋もれて
   いないか）。"stat"/"quote"/"comparison"を使いすぎて散漫になっていないか
 - stat_valueが記事の数値と一致しているか（創作した数値になっていないか）
+- 【重要】quote_contextが、スライドの役割を説明するメタな注釈（例:「動画
+  イントロ：〜」「まとめパート：〜」）になっていないか。そのままショート
+  動画の字幕としても使われるため、視聴者に意味が伝わる実際の文になって
+  いるかを確認し、なっていなければ減点してどう書き換えるべきか指摘する
 - scene_numberが台本の実際のシーン番号と一致しているか（欠番・範囲外が
   無いか。ここがズレると動画組み立て時に音声とスライドが対応しなくなる）
 - background_promptに文字・数字を描かせる指示が紛れ込んでいないか
