@@ -39,10 +39,16 @@ import wave
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from PIL import Image, ImageDraw, ImageFont
-
 from video_pipeline.script_parser import flatten_lines, parse_script
 from video_pipeline.slide_image_builder import extract_shorts_text
+from video_pipeline.subtitle_layout import (
+    SUBTITLE_FONT_SIZE,
+    SUBTITLE_MARGIN_L,
+    SUBTITLE_MARGIN_R,
+    SUBTITLE_MARGIN_V,
+    SUBTITLE_MAX_WIDTH,
+    wrap_subtitle_text,
+)
 from video_pipeline.voicevox_client import (
     DEFAULT_BASE_URL,
     DEFAULT_STYLE_NAME,
@@ -79,12 +85,8 @@ VIDEO_HEIGHT = 1080
 VIDEO_FPS = 25
 # セリフとセリフの間に挿入する無音の長さ(秒)。会話らしい"間"を作るため。
 PAUSE_BETWEEN_LINES_SECONDS = 0.4
-SUBTITLE_FONT_SIZE = 64
-SUBTITLE_MARGIN_L = 80
-SUBTITLE_MARGIN_R = 80
-# 字幕が使える横幅(px)。ここを超えたら折り返す。
-SUBTITLE_MAX_WIDTH = VIDEO_WIDTH - SUBTITLE_MARGIN_L - SUBTITLE_MARGIN_R
-_SUBTITLE_FONT_PATH = FONTS_DIR / "NotoSansJP-Bold.otf"
+# 字幕のフォントサイズ・折り返し幅・MarginVはsubtitle_layout.pyに集約している
+# (slide_image_builder側の字幕用余白の動的計算と定義をズレさせないため)。
 # 対応するスライドが見つからないシーンの最小表示時間(秒)。極端に短い
 # 無表示区間を避けるための下限。
 MIN_SLIDE_DURATION_SECONDS = 0.5
@@ -403,61 +405,22 @@ def synthesize_timeline(
     return timeline, audio_segments
 
 
-_subtitle_measure_font: ImageFont.FreeTypeFont | None = None
-
-
-def _get_subtitle_measure_font() -> ImageFont.FreeTypeFont:
-    """字幕の折り返し判定に使うフォントを読み込む(実際に焼き込まれるBold体と同じもの)。"""
-    global _subtitle_measure_font
-    if _subtitle_measure_font is None:
-        _subtitle_measure_font = ImageFont.truetype(
-            str(_SUBTITLE_FONT_PATH), SUBTITLE_FONT_SIZE
-        )
-    return _subtitle_measure_font
-
-
-def _wrap_subtitle_text(text: str, max_width: int = SUBTITLE_MAX_WIDTH) -> str:
-    """字幕が画面の横幅に収まるよう、実測した文字幅に基づいて`\\N`で複数行に折り返す。
-
-    ASS字幕はテキスト中に明示的な改行(`\\N`)を入れない限り自動では折り返されず、
-    長いセリフをそのまま1行で渡すと画面からはみ出す(実際に発生した不具合)。
-    ここでは字幕描画に使う実際のフォント(NotoSansJP-Bold)・サイズで1文字ずつ
-    幅を測り、YouTubeの字幕のように画面内に収まる範囲で複数行に分割する。
-    """
-    font = _get_subtitle_measure_font()
-    dummy_draw = ImageDraw.Draw(Image.new("RGB", (1, 1)))
-
-    lines: list[str] = []
-    current = ""
-    for ch in text:
-        trial = current + ch
-        if current and dummy_draw.textlength(trial, font=font) > max_width:
-            lines.append(current)
-            current = ch
-        else:
-            current = trial
-    if current:
-        lines.append(current)
-
-    return "\\N".join(lines) if lines else text
-
-
 def _build_ass_subtitle(timeline: list[TimedLine], output_path: str | Path) -> Path:
     """話者ごとに色分けしたASS字幕ファイルを生成する。
 
     WrapStyle: 2 を指定し、libass自身による自動折り返しを無効化した上で、
-    _wrap_subtitle_text()で計算した明示的な`\\N`だけに従わせる
+    subtitle_layout.wrap_subtitle_text()で計算した明示的な`\\N`だけに従わせる
     (自動折り返しと手動折り返しが競合してレイアウトが乱れるのを防ぐため)。
     """
     style_lines = []
     for speaker, color in SUBTITLE_STYLE_COLORS.items():
         style_lines.append(
             f"Style: {speaker},Noto Sans JP,{SUBTITLE_FONT_SIZE},{color},&H000000FF,&H00000000,&H80000000,"
-            f"-1,0,0,0,100,100,0,0,1,3,2,2,{SUBTITLE_MARGIN_L},{SUBTITLE_MARGIN_R},60,1"
+            f"-1,0,0,0,100,100,0,0,1,3,2,2,{SUBTITLE_MARGIN_L},{SUBTITLE_MARGIN_R},{SUBTITLE_MARGIN_V},1"
         )
     style_lines.append(
         f"Style: Default,Noto Sans JP,{SUBTITLE_FONT_SIZE},{DEFAULT_STYLE_COLOR},&H000000FF,&H00000000,&H80000000,"
-        f"-1,0,0,0,100,100,0,0,1,3,2,2,{SUBTITLE_MARGIN_L},{SUBTITLE_MARGIN_R},60,1"
+        f"-1,0,0,0,100,100,0,0,1,3,2,2,{SUBTITLE_MARGIN_L},{SUBTITLE_MARGIN_R},{SUBTITLE_MARGIN_V},1"
     )
 
     header = (
@@ -484,7 +447,7 @@ def _build_ass_subtitle(timeline: list[TimedLine], output_path: str | Path) -> P
         start = _format_ass_time(item.start)
         end = _format_ass_time(item.end)
         cleaned = item.text.replace("\n", " ").replace("{", "").replace("}", "")
-        text = _wrap_subtitle_text(cleaned)
+        text = wrap_subtitle_text(cleaned)
         events.append(f"Dialogue: 0,{start},{end},{style_name},,0,0,0,,{text}")
 
     output_path = Path(output_path)

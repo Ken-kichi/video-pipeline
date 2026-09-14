@@ -28,36 +28,56 @@ import json
 
 from PIL import Image, ImageDraw, ImageFont
 
+from video_pipeline.script_parser import flatten_lines, parse_script
+from video_pipeline.subtitle_layout import (
+    SUBTITLE_MARGIN_V,
+    SUBTITLE_LINE_HEIGHT_PX,
+    count_subtitle_lines,
+)
+
 FONT_PATH = Path(__file__).parent / "assets" / "fonts" / "NotoSansJP-Variable.ttf"
 CHARACTER_ASSETS_DIR = Path(__file__).parent / "assets" / "characters"
 
 SLIDE_WIDTH = 1920
 SLIDE_HEIGHT = 1080
 MARGIN = 100
-# code/diagramスライドの画像が、画面下部の字幕・キャラクター立ち絵オーバーレイ
-# と重ならないよう確保する下部の余白(px)。
-# - SUBTITLE_RESERVED_SPACE: 字幕は常に表示されるので無条件に確保する
-#   (2行分の字幕+マージンを想定。以前はこの分の余白を確保していなかったため、
-#   キャラクターが無い環境でもcode/diagramスライドが字幕と重なる余地があった)
+# code/diagram/table/imageスライドの画像が、画面下部の字幕・キャラクター立ち絵
+# オーバーレイと重ならないよう確保する下部の余白(px)。
+# - 字幕側の余白: 字幕は常に表示されるので無条件に確保する。行数は
+#   scene内の実際のセリフから動的に計算する(_media_bottom_reserved_space参照)。
+#   以前は「2行分の字幕+マージン」を想定した固定値(260px)しか確保しておらず、
+#   長いセリフが3行以上に折り返されると字幕がスライド内容(表・図・キャプション)
+#   に重なる不具合が実際に発生した。
 # - CHARACTER_RESERVED_SPACE: 立ち絵素材(video_assembler.CHARACTER_VIDEO_HEIGHT
 #   =300px)がある場合に必要な余白。字幕と同じく画面下部に重なる領域なので、
 #   両者を足し算せず大きい方を採用する(_media_bottom_reserved_space参照)
-SUBTITLE_RESERVED_SPACE = 260
+# scene内のセリフ情報が無い(呼び出し元が未対応)場合のフォールバック値。
+# 従来の「2行分」を想定した余白。
+DEFAULT_SUBTITLE_RESERVED_SPACE = SUBTITLE_MARGIN_V + 2 * SUBTITLE_LINE_HEIGHT_PX
 CHARACTER_RESERVED_SPACE = 340
 LINE_SPACING = 1.4
+# 極端に長いセリフでスライドの表示領域がほぼ潰れてしまわないための下限(px)。
+MIN_MEDIA_CONTENT_HEIGHT = 200
 
 
-def _media_bottom_reserved_space() -> int:
+def _media_bottom_reserved_space(subtitle_max_lines: int | None = None) -> int:
     """字幕・キャラクター立ち絵と重ならないために確保すべき下部余白を返す。
 
-    どちらも画面下部に配置される(縦に積み上がるわけではない)ため、
-    必要な余白は大きい方の値を採用する。キャラクター素材の有無は
-    render-video側のオーバーレイ有無と一致させるため、ここでも
-    assets/characters/を見て判定する(以前は素材が無くても常に
-    CHARACTER_RESERVED_SPACE分を確保しており、使っていない人まで
-    表示領域が不必要に狭くなっていた)。
+    subtitle_max_linesには、このスライドが表示されている間に流れうる
+    セリフのうち最も行数が多いものの折り返し後行数を渡す(pipeline.py側で
+    script.mdの実テキストから計算する)。指定が無い場合は「2行分」を
+    想定した従来の固定値にフォールバックする。
+
+    字幕・キャラクター立ち絵はどちらも画面下部に配置される(縦に積み上がる
+    わけではない)ため、必要な余白は大きい方の値を採用する。キャラクター素材
+    の有無はrender-video側のオーバーレイ有無と一致させるため、ここでも
+    assets/characters/を見て判定する。
     """
-    reserved = SUBTITLE_RESERVED_SPACE
+    if subtitle_max_lines is None:
+        reserved = DEFAULT_SUBTITLE_RESERVED_SPACE
+    else:
+        reserved = SUBTITLE_MARGIN_V + max(1, subtitle_max_lines) * SUBTITLE_LINE_HEIGHT_PX
+
     has_character_assets = CHARACTER_ASSETS_DIR.exists() and any(
         CHARACTER_ASSETS_DIR.glob("*_open.png")
     )
@@ -231,7 +251,10 @@ def build_title_slide(
 
 
 def _render_bullets(
-    img: Image.Image, draw: ImageDraw.ImageDraw, slide_data: dict
+    img: Image.Image,
+    draw: ImageDraw.ImageDraw,
+    slide_data: dict,
+    subtitle_max_lines: int | None = None,
 ) -> None:
     """タイトル+箇条書き(標準レイアウト)。"""
     title_font = _load_font(56, weight=700)
@@ -254,7 +277,12 @@ def _render_bullets(
         y += 16
 
 
-def _render_stat(img: Image.Image, draw: ImageDraw.ImageDraw, slide_data: dict) -> None:
+def _render_stat(
+    img: Image.Image,
+    draw: ImageDraw.ImageDraw,
+    slide_data: dict,
+    subtitle_max_lines: int | None = None,
+) -> None:
     """1つの数値・指標を画面中央に大きく見せるレイアウト。"""
     title = slide_data.get("title", "")
     stat_value = slide_data.get("stat_value", "")
@@ -296,7 +324,10 @@ def _render_stat(img: Image.Image, draw: ImageDraw.ImageDraw, slide_data: dict) 
 
 
 def _render_quote(
-    img: Image.Image, draw: ImageDraw.ImageDraw, slide_data: dict
+    img: Image.Image,
+    draw: ImageDraw.ImageDraw,
+    slide_data: dict,
+    subtitle_max_lines: int | None = None,
 ) -> None:
     """1文のキーメッセージを画面中央に大きく見せるレイアウト。"""
     quote_text = slide_data.get("quote_text", "")
@@ -331,7 +362,10 @@ def _render_quote(
 
 
 def _render_comparison(
-    img: Image.Image, draw: ImageDraw.ImageDraw, slide_data: dict
+    img: Image.Image,
+    draw: ImageDraw.ImageDraw,
+    slide_data: dict,
+    subtitle_max_lines: int | None = None,
 ) -> None:
     """2つの対象を左右に並べて比較するレイアウト。"""
     title_font = _load_font(56, weight=700)
@@ -381,14 +415,18 @@ def _render_comparison(
 
 
 def _render_media_layout(
-    img: Image.Image, draw: ImageDraw.ImageDraw, slide_data: dict, image_path_key: str
+    img: Image.Image,
+    draw: ImageDraw.ImageDraw,
+    slide_data: dict,
+    image_path_key: str,
+    subtitle_max_lines: int | None = None,
 ) -> None:
-    """code/diagram共通: タイトル+画像(コード/mermaid図)+captionを描画する。
+    """code/diagram/table/image共通: タイトル+画像+captionを描画する。
 
-    画面下部は、キャラクター立ち絵オーバーレイ(video_assembler側で合成)が
-    使う領域として一定の余白(MEDIA_BOTTOM_RESERVED_SPACE)を確保しておく。
-    確保しないと、内容が長いコード/図がキャラクターと重なってしまう
-    不具合が実際に発生した。
+    画面下部は、字幕・キャラクター立ち絵オーバーレイ(video_assembler側で
+    合成)が使う領域として一定の余白を確保しておく。確保しないと、内容が
+    長いコード/図/表や、長いセリフで複数行に折り返された字幕がスライド内容
+    と重なってしまう不具合が実際に発生した。
     """
     title_font = _load_font(48, weight=700)
     caption_font = _load_font(30, weight=400)
@@ -411,7 +449,10 @@ def _render_media_layout(
     image_path = slide_data.get(image_path_key)
     if image_path and Path(image_path).exists():
         max_w = SLIDE_WIDTH - MARGIN * 2
-        max_h = SLIDE_HEIGHT - y - _media_bottom_reserved_space() - caption_height
+        reserved = _media_bottom_reserved_space(subtitle_max_lines)
+        max_h = max(
+            MIN_MEDIA_CONTENT_HEIGHT, SLIDE_HEIGHT - y - reserved - caption_height
+        )
         media = _fit_image(image_path, max_w, max_h)
         media_x = (SLIDE_WIDTH - media.width) // 2
         media_y = y + max(0, (max_h - media.height) // 2)
@@ -442,26 +483,44 @@ def _render_media_layout(
         )
 
 
-def _render_code(img: Image.Image, draw: ImageDraw.ImageDraw, slide_data: dict) -> None:
+def _render_code(
+    img: Image.Image,
+    draw: ImageDraw.ImageDraw,
+    slide_data: dict,
+    subtitle_max_lines: int | None = None,
+) -> None:
     """記事中の実際のコードブロックを表示するレイアウト。"""
-    _render_media_layout(img, draw, slide_data, "code_image_path")
+    _render_media_layout(img, draw, slide_data, "code_image_path", subtitle_max_lines)
 
 
 def _render_diagram(
-    img: Image.Image, draw: ImageDraw.ImageDraw, slide_data: dict
+    img: Image.Image,
+    draw: ImageDraw.ImageDraw,
+    slide_data: dict,
+    subtitle_max_lines: int | None = None,
 ) -> None:
     """記事中の実際のmermaid図を表示するレイアウト。"""
-    _render_media_layout(img, draw, slide_data, "diagram_image_path")
+    _render_media_layout(img, draw, slide_data, "diagram_image_path", subtitle_max_lines)
 
 
-def _render_table(img: Image.Image, draw: ImageDraw.ImageDraw, slide_data: dict) -> None:
+def _render_table(
+    img: Image.Image,
+    draw: ImageDraw.ImageDraw,
+    slide_data: dict,
+    subtitle_max_lines: int | None = None,
+) -> None:
     """記事中の実際の表を表示するレイアウト。"""
-    _render_media_layout(img, draw, slide_data, "table_image_path")
+    _render_media_layout(img, draw, slide_data, "table_image_path", subtitle_max_lines)
 
 
-def _render_image(img: Image.Image, draw: ImageDraw.ImageDraw, slide_data: dict) -> None:
+def _render_image(
+    img: Image.Image,
+    draw: ImageDraw.ImageDraw,
+    slide_data: dict,
+    subtitle_max_lines: int | None = None,
+) -> None:
     """記事中の画像URLからダウンロードした画像を表示するレイアウト。"""
-    _render_media_layout(img, draw, slide_data, "article_image_path")
+    _render_media_layout(img, draw, slide_data, "article_image_path", subtitle_max_lines)
 
 
 _LAYOUT_RENDERERS = {
@@ -488,12 +547,20 @@ _LAYOUT_FALLBACK_COLOR = {
 
 
 def build_content_slide(
-    slide_data: dict, slide_number: int, output_path: str | Path
+    slide_data: dict,
+    slide_number: int,
+    output_path: str | Path,
+    subtitle_max_lines: int | None = None,
 ) -> Path:
     """本編の1スライドを生成する。layoutフィールドに応じて描画方法を切り替える。
 
     background_pathが設定されていれば、その画像+スクリムを土台にして
     テキストを重ねる。無ければlayoutごとの単色背景になる。
+
+    subtitle_max_linesは、このスライドが表示されている間に流れるセリフの
+    うち最も行数が多いものの折り返し後行数(build_slide_images参照)。
+    table/diagram/code/imageレイアウトが、字幕と重ならないよう下部に
+    確保する余白の計算に使う。
     """
     layout = slide_data.get("layout", "bullets")
     fallback_color = _LAYOUT_FALLBACK_COLOR.get(layout, BG_COLOR)
@@ -504,7 +571,7 @@ def build_content_slide(
     draw.rectangle([(0, 0), (SLIDE_WIDTH, 16)], fill=ACCENT_COLOR)
 
     renderer = _LAYOUT_RENDERERS.get(layout, _render_bullets)
-    renderer(img, draw, slide_data)
+    renderer(img, draw, slide_data, subtitle_max_lines)
 
     _draw_footer(draw, slide_number)
 
@@ -539,20 +606,43 @@ def extract_shorts_text(slide_data: dict) -> tuple[str, list[str]]:
     return slide_data.get("title", ""), list(slide_data.get("bullets", []))
 
 
+def _scene_max_subtitle_lines(script_text: str) -> dict[int, int]:
+    """シーンごとに、そのシーンの最も長いセリフが折り返される行数を返す。
+
+    table/diagram/code/imageスライドは表示中にシーン内のどのセリフが
+    流れるか(シーンをまたいだスライド切り替えのタイミング)まではここでは
+    分からないため、シーン内の全セリフのうち最大の行数を安全側の見積もりとして使う。
+    """
+    scenes = parse_script(script_text)
+    result: dict[int, int] = {}
+    for line in flatten_lines(scenes):
+        lines = count_subtitle_lines(line.text)
+        result[line.scene_number] = max(result.get(line.scene_number, 1), lines)
+    return result
+
+
 def build_slide_images(
     title: str,
     slides: list[dict],
     output_dir: str | Path,
     title_background_path: str | None = None,
+    script_text: str | None = None,
 ) -> list[Path]:
     """表紙+各スライドをPNGとして書き出し、生成したファイルパスの一覧を返す。
 
     あわせて manifest.json に各スライドファイルと scene_number の対応を
     書き出す(動画組み立て時に、どのシーンの音声が流れている間にどの
     スライドを表示するかを決めるために使う)。
+
+    script_textを渡すと、シーンごとの実際のセリフの長さから字幕の想定行数を
+    計算し、table/diagram/code/imageスライドが確保する下部余白に反映する
+    (長いセリフの字幕がスライド内容と重なる不具合を防ぐため)。省略した
+    場合は「字幕は2行」を想定した固定の余白にフォールバックする。
     """
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
+
+    scene_max_lines = _scene_max_subtitle_lines(script_text) if script_text else {}
 
     title_path = build_title_slide(
         title,
@@ -571,7 +661,10 @@ def build_slide_images(
     ]
 
     for i, slide_data in enumerate(slides, start=1):
-        path = build_content_slide(slide_data, i, output_dir / f"slide_{i:02d}.png")
+        subtitle_max_lines = scene_max_lines.get(slide_data.get("scene_number"))
+        path = build_content_slide(
+            slide_data, i, output_dir / f"slide_{i:02d}.png", subtitle_max_lines
+        )
         paths.append(path)
         manifest.append(
             {

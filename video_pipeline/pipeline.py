@@ -327,7 +327,7 @@ def run_pipeline(
     )
     description_path = write_text_file(output_dir_path / "description.txt", description)
     slide_image_paths = build_slide_images(
-        video_title, slides, output_dir_path / "slides"
+        video_title, slides, output_dir_path / "slides", script_text=script
     )
 
     print("\n=== 完了 ===")
