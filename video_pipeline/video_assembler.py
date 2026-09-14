@@ -642,26 +642,42 @@ def _render_zoom_clip(
     zoom_rate_per_second: float = SLIDE_ZOOM_RATE_PER_SECOND,
     zoom_max_scale: float = SLIDE_ZOOM_MAX_SCALE,
 ) -> Path:
-    """1枚の静止画から、ゆっくりズームインするKen Burns風の短い動画クリップを作る。
+    """1枚の静止画から、ゆっくりズームインアウトを繰り返すKen Burns風の短い動画クリップを作る。
 
     zoompanフィルタは経験上「フレーム数(d)」基準で動くため、指定秒数分
     より少し多めのフレームを生成させ、最後に-tで正確な秒数に切り詰める
     (端数フレームでのズーム量の誤差より、秒数の正確さを優先する)。
 
-    ズーム速度(1秒あたりの倍率増加量)を固定し、表示終了時点の倍率は
-    duration*zoom_rate_per_secondから逆算する(zoom_max_scaleで頭打ち)。
-    表示終了倍率を固定してしまうと、表示時間が長いスライドほど同じ量を
-    薄く引き延ばすことになりズームがほぼ止まって見えるため。
+    ズーム速度(1秒あたりの倍率増加量)は常に固定する。表示終了時点の倍率を
+    固定してしまうと、表示時間が長いスライドほど同じ量を薄く引き延ばす
+    ことになりズームがほぼ止まって見えるため。
+
+    倍率はzoom_max_scaleで頭打ちにするが、そこで停止はさせず同じ速度で
+    1.0倍まで縮小し、また拡大に転じる三角波として往復させ続ける
+    (frame番号onから直接計算する閉じた式で、前フレームのzoom値には依存
+    しない)。以前は上限で完全に停止していたため、ナレーションが長く続く
+    シーン(上限到達までの時間より長く表示されるスライド)では、まだ喋って
+    いるのに画面が静止して見える不具合が実際に発生した。
     """
     frame_count = max(1, round(duration * fps)) + fps  # 余裕を持って多めに生成
-    zoom_end_scale = min(zoom_max_scale, 1.0 + zoom_rate_per_second * duration)
     zoom_increment = zoom_rate_per_second / fps
+    amplitude = zoom_max_scale - 1.0
+    half_period_frames = max(1, round(amplitude / zoom_increment))
+    full_period_frames = half_period_frames * 2
     upscale_w = VIDEO_WIDTH * _ZOOM_UPSCALE_FACTOR
     upscale_h = VIDEO_HEIGHT * _ZOOM_UPSCALE_FACTOR
+    # x/yを指定しないとzoompanは既定で(0,0)、つまり画面左上を起点にズームする。
+    # そのため表示時間が長いスライドほどズームが進むにつれ右端・下端が
+    # フレーム外に押し出されて見切れてしまう(実際に発生した不具合)。
+    # 中心を起点にズームさせることで、どれだけズームしても画面中央基準で
+    # 拡大され、端の内容が見切れないようにする。
+    phase = f"mod(on,{full_period_frames})"
+    triangle = f"if(lte({phase},{half_period_frames}),{phase},{full_period_frames}-{phase})"
     zoompan_filter = (
         f"scale={upscale_w}:{upscale_h}:force_original_aspect_ratio=increase,"
         f"crop={upscale_w}:{upscale_h},"
-        f"zoompan=z='min(zoom+{zoom_increment:.8f},{zoom_end_scale:.6f})':"
+        f"zoompan=z='1+{zoom_increment:.8f}*{triangle}':"
+        "x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':"
         f"d={frame_count}:s={VIDEO_WIDTH}x{VIDEO_HEIGHT}:fps={fps}"
     )
     _run_ffmpeg(
