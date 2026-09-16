@@ -14,8 +14,10 @@ from video_pipeline.config import MAX_TOKENS
 
 _client: Anthropic | None = None
 
-# 出力がmax_tokensで打ち切られた場合、この上限まで倍々に増やして再生成する
-MAX_TOKENS_CEILING = 16000
+# 出力がmax_tokensで打ち切られた場合、この上限まで倍々に増やして再生成する。
+# 非ストリーミングAPIはmax_tokensが21333を超えるとSDKがValueErrorを出すため、
+# それより余裕を持たせた値にする(21333を超えたい場合はstream=Trueへの変更が必要)。
+MAX_TOKENS_CEILING = 20000
 
 
 def get_client() -> Anthropic:
@@ -64,6 +66,7 @@ def _generate_with_truncation_retry(
                 f"  [警告] max_tokens={current_max_tokens}でも出力が打ち切られました。"
                 "内容が不完全な可能性があります"
             )
+            break
 
     return last_text
 
