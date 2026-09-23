@@ -22,10 +22,23 @@ import re
 from dataclasses import dataclass, field
 
 SCENE_HEADER_RE = re.compile(r"^#{1,4}\s*シーン\s*(\d+)")
-DIALOGUE_RE = re.compile(r"^(つむぎ|ずんだもん)(?:（(喜び|驚き|悲しみ|怒り)）)?「(.+)」\s*$")
+# 感情タグ部分は特定の4語(喜び|驚き|悲しみ|怒り)だけに絞らず、括弧内の
+# 任意の文字列を緩くキャプチャする(全角/半角どちらの括弧にも対応)。
+# script_agentのプロンプトはこの4語のみを使うよう指示しているが、LLMが
+# 厳密に守るとは限らない(似た語「困惑」等を使う、半角括弧を使う、等の
+# ブレが起こりうる)。以前は4語への完全一致を正規表現自体に組み込んで
+# いたため、想定外の語が1つでも来るとタグ部分だけでなく行全体がマッチせず、
+# そのセリフが警告無しで丸ごと消えてしまっていた。未知の語は下のEMOTION_LABELS
+# 参照で"neutral"として扱われる(セリフ本文は必ず拾われる)。
+DIALOGUE_RE = re.compile(r"^(つむぎ|ずんだもん)(?:[（(]([^）)]*)[）)])?「(.+)」\s*$")
+# 話者名+「...」を含みそうだが、上のDIALOGUE_REにはマッチしなかった行を
+# 検出するための緩い判定(警告表示用)。想定外のフォーマット崩れ
+# (閉じ括弧の欠落等)でセリフが無警告のまま失われるのを防ぐ。
+_POSSIBLE_DIALOGUE_RE = re.compile(r"^(つむぎ|ずんだもん).*「")
 
 # 台本上の日本語の感情タグ語 -> character_emotion_assets.pyのファイル名に
-# 使う英語キーへの対応。
+# 使う英語キーへの対応。ここに無い語(LLMが4語以外を使った場合)は
+# parse_script側でneutral扱いにフォールバックする(セリフ自体は失わない)。
 EMOTION_LABELS = {"喜び": "happy", "驚き": "surprised", "悲しみ": "sad", "怒り": "angry"}
 
 
@@ -80,6 +93,12 @@ def parse_script(script_text: str) -> list[Scene]:
                     emotion=emotion,
                 )
             )
+        elif _POSSIBLE_DIALOGUE_RE.match(line):
+            # セリフらしき行(話者名+「を含む)なのにDIALOGUE_REにマッチしな
+            # かった場合、そのまま無視すると原因不明のままセリフが1行丸ごと
+            # 動画から消えてしまう。フォーマット崩れの可能性が高いことを
+            # 警告として出す(パース自体は継続する)。
+            print(f"  [警告] script_parser: セリフらしき行を解析できませんでした: {line}")
 
     return scenes
 
