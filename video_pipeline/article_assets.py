@@ -67,8 +67,14 @@ def _split_table_row(line: str) -> list[str]:
 
 
 def _is_table_separator_row(line: str) -> bool:
-    """`|---|---|`のような区切り行かどうかを判定する。"""
-    if "|" not in line and "-" not in line:
+    """`|---|---|`のような区切り行かどうかを判定する。
+
+    `|`を1つも含まない行(単独の`---`等、Markdownの水平線)は区切り行として
+    扱わない。シェルのパイプを説明する文(`` `ls | grep foo` ``)の直後に
+    空行無しで水平線`---`が続くケースで、地の文+水平線を1列・0行の表として
+    誤検出してしまう不具合があったため。
+    """
+    if "|" not in line:
         return False
     cells = _split_table_row(line)
     if not cells:
@@ -150,13 +156,18 @@ def extract_article_assets(
             i += 1
             continue
 
+        candidate_header = _split_table_row(raw_line) if "|" in raw_line else []
         if (
             "|" in raw_line
             and raw_line.strip()
             and i + 1 < n
             and _is_table_separator_row(lines[i + 1])
+            # 区切り行の列数がヘッダー候補行と一致しない場合は表とみなさない
+            # (地の文にたまたま含まれる`|`と、直後の無関係な水平線が誤って
+            # 表として検出されるのを防ぐ)。
+            and len(_split_table_row(lines[i + 1])) == len(candidate_header)
         ):
-            header = _split_table_row(raw_line)
+            header = candidate_header
             i += 2
             rows: list[list[str]] = []
             while i < n and "|" in lines[i] and lines[i].strip():
