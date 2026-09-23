@@ -57,7 +57,11 @@ DEFAULT_VIDEO_TITLE = "解説動画"
 
 
 def _run_integration_loop(
-    article_text: str, script: str, slides: list[dict], voicevox_text: str
+    article_text: str,
+    script: str,
+    slides: list[dict],
+    voicevox_text: str,
+    asset_summary: str = "",
 ) -> tuple[str, list[dict], str, int, list[dict]]:
     """総合エージェントによる整合性チェック→(必要なら)修正ループ。
 
@@ -104,7 +108,9 @@ def _run_integration_loop(
             script = script_agent.revise(article_text, script, script_feedback)
         if slides_feedback:
             print("  スライドを修正中...")
-            slides = slides_agent.revise(script, slides, slides_feedback)
+            slides = slides_agent.revise(
+                script, slides, slides_feedback, asset_summary
+            )
         if voicevox_feedback:
             print("  VOICEVOXテキストを修正中...")
             voicevox_text = voicevox_agent.revise(
@@ -286,7 +292,9 @@ def run_pipeline(
 
     print("=== 総合エージェント（整合性チェック） ===")
     script, slides, voicevox_text, integration_score, integration_history = (
-        _run_integration_loop(article_text, script, slides, voicevox_text)
+        _run_integration_loop(
+            article_text, script, slides, voicevox_text, asset_summary
+        )
     )
 
     if video_title is None:
