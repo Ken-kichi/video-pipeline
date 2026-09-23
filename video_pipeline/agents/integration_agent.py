@@ -137,4 +137,15 @@ def check(script: str, slides: list[dict], voicevox_text: str) -> dict:
         )
         return claude_result
 
-    return _merge(claude_result, gemini_result)
+    try:
+        return _merge(claude_result, gemini_result)
+    except Exception as exc:  # noqa: BLE001 マージ(Claude呼び出し)の障害でも
+        # 品質ゲート自体を止めたくない。ClaudeとGeminiの個別チェックは
+        # どちらも成功しているので、_merge()内のcall_json()がパース
+        # リトライを使い果たす等で失敗した場合もClaude単独の結果に
+        # フォールバックする(捕捉しないと、この後run_pipeline全体が
+        # クラッシュしてしまっていた)。
+        print(
+            f"  [{LABEL}] チェック結果の統合(マージ)に失敗したためClaude単独の結果を使います: {exc}"
+        )
+        return claude_result
