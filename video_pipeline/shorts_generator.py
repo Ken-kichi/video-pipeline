@@ -618,12 +618,29 @@ def _build_character_video(
         filter_stages.append(f"[{closed_idx}:v]scale=-2:{CHARACTER_SHORTS_HEIGHT}[{closed_label}]")
         filter_stages.append(f"[{open_idx}:v]scale=-2:{CHARACTER_SHORTS_HEIGHT}[{open_label}]")
 
+        prefix = CHARACTER_PREFIXES.get(speaker, speaker)
+        # 対応する立ち絵素材(closed/openとも)が実際に用意できる感情だけを
+        # 対象にする(video_assemblerの同ロジックと同じ理由。ここで絞り込まないと、
+        # 素材が無い感情の区間でもキャラクターが画面から消えてしまう)。
+        speaker_emotion_intervals = emotion_intervals.get(speaker, {})
+        emotion_assets = {
+            emotion: (
+                character_emotion_assets.get_emotion_asset_path(prefix, emotion, "closed"),
+                character_emotion_assets.get_emotion_asset_path(prefix, emotion, "open"),
+            )
+            for emotion in speaker_emotion_intervals
+        }
+        speaker_emotion_intervals = {
+            emotion: intervals_
+            for emotion, intervals_ in speaker_emotion_intervals.items()
+            if emotion_assets[emotion][0] is not None and emotion_assets[emotion][1] is not None
+        }
         # 表情差分の立ち絵が表示される区間は、通常表情のベースレイヤーを
         # 非表示にする(video_assemblerの同ロジックと同じ理由。でないと
         # 同じ位置に2枚の立ち絵が同時に描画されて二重に見えてしまう)。
         emotion_active_ranges = [
             interval
-            for intervals_ in emotion_intervals.get(speaker, {}).values()
+            for intervals_ in speaker_emotion_intervals.values()
             for interval in intervals_["closed"]
         ]
         # closed/openは別々の立ち絵素材でシルエットが厳密には一致しないため、
@@ -657,12 +674,10 @@ def _build_character_video(
             f"bg{stage}o",
         )
 
-        prefix = CHARACTER_PREFIXES.get(speaker, speaker)
-        for emotion, intervals in emotion_intervals.get(speaker, {}).items():
-            closed_e_path = character_emotion_assets.get_emotion_asset_path(prefix, emotion, "closed")
-            open_e_path = character_emotion_assets.get_emotion_asset_path(prefix, emotion, "open")
-            if closed_e_path is None or open_e_path is None:
-                continue
+        # speaker_emotion_intervalsは既にclosed/open両方の素材が揃っている
+        # 感情だけに絞り込み済みなので、ここで再度Noneチェックする必要はない。
+        for emotion, intervals in speaker_emotion_intervals.items():
+            closed_e_path, open_e_path = emotion_assets[emotion]
             closed_e_path = _crop_character_image(closed_e_path, work_dir)
             open_e_path = _crop_character_image(open_e_path, work_dir)
 

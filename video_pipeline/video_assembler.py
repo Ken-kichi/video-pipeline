@@ -1016,7 +1016,26 @@ def assemble_video(
             # 開けっぱなしにフォールバックする(口パク無しよりはこちらの方が自然)
             for interval in (item.mouth_open_intervals or [(item.start, item.end)])
         ]
+        prefix = CHARACTER_PREFIXES.get(speaker, speaker)
         emotion_groups = _group_non_neutral_emotion_intervals(timeline, speaker)
+        # 対応する立ち絵素材(closed/openとも)が実際に用意できる感情だけを
+        # 対象にする。ここで絞り込まずemotion_active_rangesを組み立てると、
+        # 素材が無い(GEMINI_API_KEY未設定・生成失敗等)感情の区間でも通常
+        # 表情のベースレイヤーを非表示にしてしまい、キャラクターがその区間
+        # 丸ごと画面から消えてしまう(character_emotion_assets.pyが約束する
+        # 「素材が無ければ通常表情にフォールバックする」動作が壊れる)。
+        emotion_assets = {
+            emotion: (
+                character_emotion_assets.get_emotion_asset_path(prefix, emotion, "closed"),
+                character_emotion_assets.get_emotion_asset_path(prefix, emotion, "open"),
+            )
+            for emotion in emotion_groups
+        }
+        emotion_groups = {
+            emotion: intervals_
+            for emotion, intervals_ in emotion_groups.items()
+            if emotion_assets[emotion][0] is not None and emotion_assets[emotion][1] is not None
+        }
         # 表情差分の立ち絵が表示される区間は、通常表情のベースレイヤーを
         # 非表示にする(でないと同じ位置に2枚の立ち絵が同時に描画されて
         # 二重に見えてしまう)。
@@ -1071,17 +1090,12 @@ def assemble_video(
 
         # 表情差分の立ち絵(あれば)を、対応する感情のセリフの区間だけ
         # 通常表情の上から重ねる。closed→openの順に重ねることで、同じ
-        # 感情内でも口パクが再現される(通常表情と同じ仕組み)。
-        prefix = CHARACTER_PREFIXES.get(speaker, speaker)
+        # 感情内でも口パクが再現される(通常表情と同じ仕組み)。emotion_groupsは
+        # 既にclosed/open両方の素材が揃っている感情だけに絞り込み済みなので、
+        # ここで再度Noneチェックする必要はない(get_emotion_asset_pathも
+        # 二重に呼ばない)。
         for emotion, emotion_intervals in emotion_groups.items():
-            closed_e_path = character_emotion_assets.get_emotion_asset_path(
-                prefix, emotion, "closed"
-            )
-            open_e_path = character_emotion_assets.get_emotion_asset_path(
-                prefix, emotion, "open"
-            )
-            if closed_e_path is None or open_e_path is None:
-                continue
+            closed_e_path, open_e_path = emotion_assets[emotion]
 
             ffmpeg_inputs += ["-i", str(closed_e_path)]
             closed_e_idx = input_index
