@@ -40,7 +40,7 @@ PNG画像と合わせてタイムラインに並べる（詳細は「音声合�
 
 完成したら、`output/<実行時刻>/final_video.mp4`・`shorts.mp4`・`thumbnail.png`を
 YouTubeにアップロードし、`description.txt`の内容を概要欄に貼る。**投稿前に必ず**
-`description.txt`内の元記事URL・立ち絵クレジットのプレースホルダーを
+`description.txt`内の元記事URL・立ち絵クレジット・ショート版URLのプレースホルダーを
 実際の内容に差し替えること（詳細は「概要欄のクレジット表記について」参照）。
 
 ## 全体の流れ
@@ -110,6 +110,14 @@ flowchart TD
 
 台本エージェントは、冒頭0:00〜1:00を単体でショート動画としても成立する
 「概要・メリット訴求パート」、残り約9分を詳細解説パートという構成で生成する。
+
+台本エージェントはセリフごとに、その瞬間に感情が明確に動く箇所だけ
+（多用しないよう指示している）`つむぎ（驚き）「え、そんなに速くなるのだ！？」`
+のように話者名の直後に感情タグ（喜び/驚き/悲しみ/怒り）を付けられる。
+このタグは`render-video`実行時に読み取られ、対応する立ち絵素材があれば
+その区間だけ表情違いの立ち絵に切り替わる（詳細は「立ち絵オーバーレイ」内の
+「感情差分の立ち絵」参照。タグを付けなかった区間・対応素材が無い場合は
+今まで通りの通常表情のまま動作する）。
 
 総合エージェントのループは、スコアが`SCORE_THRESHOLD`以上でも`issues`が
 1件でも残っていれば修正ループを継続する（**以前はスコアだけで判定しており、
@@ -275,6 +283,34 @@ uv run render-video
   完全なフレーズ単位で追加すること（「値」単体や「値が」のような断片は
   他の複合語を壊すリスクがある）
 
+## スライドのズーム演出(Ken Burnsエフェクト)
+
+静止画のスライドをそのまま表示し続けると単調に見えるため、`render-video`は
+各スライドにゆっくりとしたズーム(Ken Burns風の`zoompan`)を自動でかける
+(`video_assembler.SLIDE_ZOOM_ENABLED`で無効化可能、デフォルトはON)。
+
+- **三角波でズームイン/アウトを繰り返す**: 以前は`SLIDE_ZOOM_MAX_SCALE`
+  (デフォルト1.15倍)に向けて一方向にズームし、到達したらそこで静止する
+  実装だった。しかしナレーションが長いスライドでは最大倍率に到達したあと
+  画面が完全に静止して見えてしまう不具合が実際に発生した。そこで、
+  表示されている間ずっと1.0倍と`SLIDE_ZOOM_MAX_SCALE`の間を一定速度
+  (`SLIDE_ZOOM_RATE_PER_SECOND`、デフォルト毎秒0.6%)で往復し続ける
+  三角波に変更し、表示時間が長くても止まって見えないようにした
+- **画面中央を基準にズーム**: 以前はffmpegの`zoompan`のデフォルトである
+  左上を基準にズームしていたため、表示時間が長いスライドほどズームが
+  進むにつれ右端・下端がフレーム外に押し出されて見切れてしまう不具合が
+  実際に発生した。`x`/`y`を`(iw/2-(iw/zoom/2), ih/2-(ih/zoom/2))`に
+  明示的に指定し、常に画面中央を基準にズームするよう修正した
+- ズーム**速度**はスライドの表示時間によらず固定にしている(以前は最終的な
+  倍率を固定してその分を表示時間で割っていたため、表示時間が長いスライド
+  ほどズームがほとんど体感できないほど遅くなる問題があった)
+- ズーム処理に失敗したスライドは、ズーム無しの静止クリップにフォールバック
+  する(動画組み立て全体は止まらない)
+- YouTubeショート(`create-shorts`)の中段スライドカードにも、同じ手法を
+  再利用したズームイン演出(`shorts_generator._render_slide_text_zoom_clip`)が
+  入っている。こちらはクリップが短いため、往復せず1.06倍までズームインして
+  止まるだけのシンプルな一方向仕様にしている
+
 ## BGM・効果音
 
 ```bash
@@ -386,6 +422,30 @@ code/diagramスライド側にも字幕・キャラクター表示分の下部�
 (`slide_image_builder._media_bottom_reserved_space()`。キャラクター素材が
 無い環境では字幕分の余白だけを確保する)を確保するようにした。
 
+### 感情差分の立ち絵（任意）
+
+台本エージェントが付けた感情タグ（喜び/驚き/悲しみ/怒り）の区間だけ、
+通常表情とは別の表情の立ち絵に自動で切り替えられる。`character_emotion_assets.py`が、
+`prepare-characters`で作った通常表情のPNG（`{tsumugi,zundamon}_{closed,open}.png`）を
+参照画像としてGeminiに渡し、目・眉・頬・姿勢だけを変えた表情違い（口の状態には
+触れない指示にしている）を生成する。
+
+Gemini(Nano Banana系)は透過PNGを直接出力できないため、背景をマゼンタ
+(`#FF00FF`。ずんだもんの緑髪と衝突しないよう選定)のクロマキー色で塗らせる
+よう指示した上で、4隅が実際にその色になっているか検証し(ずれていれば最大3回まで
+再生成)、`ImageChops`によるバンド演算でアルファチャンネルに変換している。
+
+生成した表情違いの立ち絵(口の開閉2状態×4感情×2キャラ、最大16枚)は
+`video_pipeline/assets/characters/`に`tsumugi_happy_closed.png`のような
+ファイル名で永続的にキャッシュされ、以降どの動画でも使い回される
+（1つの動画のためだけに毎回作り直すと絵柄がぶれるため、また同じ表情を
+何度も生成し直すコスト・時間を避けるため）。生成は各感情が台本で
+実際に使われた時点で初回のみ行われる。
+
+`GEMINI_API_KEY`未設定、参照画像が無い、生成や検証に失敗した場合は
+`None`を返し、その区間は通常表情のままフォールバックする
+（パイプライン全体は止まらない）。
+
 ## 出力ファイル
 
 | ファイル | 内容 |
@@ -401,6 +461,15 @@ code/diagramスライド側にも字幕・キャラクター表示分の下部�
 | `output/<実行時刻>/final_video.mp4` | （`render-video`実行後）色分け字幕つき（立ち絵素材があれば口の開閉つき）の完成動画 |
 | `output/<実行時刻>/scene_boundaries.json` | （`render-video`実行後）シーンごとの正確な開始/終了時刻。`create-shorts`が切り出し位置に使う |
 | `output/<実行時刻>/shorts_data.json` | （`render-video`実行後）シーンごとの見出し・箇条書きと話者ごとの発話区間。`create-shorts`が中段のスライド文字・下段のキャラクター口パクの再構成に使う |
+| `output/<実行時刻>/media/table_{n}.png` | （記事に表があり、該当スライドで参照された場合のみ）記事中のMarkdown表を描画した画像 |
+| `output/<実行時刻>/media/image_{n}.png` | （記事に外部URLの画像があり、該当スライドで参照された場合のみ）記事からダウンロードした画像 |
+
+上記に加えて、`video_pipeline/assets/characters/`には`prepare-characters`が
+書き出す通常表情のPNGとは別に、感情タグ付きセリフを初めて含む台本を
+生成したタイミングで`{tsumugi,zundamon}_{happy,surprised,sad,angry}_{closed,open}.png`
+が追加で生成される（`output/<実行時刻>/`配下ではなく、パッケージのassetsに
+永続的にキャッシュされ以降の全動画で使い回される点に注意。詳細は
+「立ち絵オーバーレイ」内の「感情差分の立ち絵」参照）。
 
 ## 構成
 
@@ -408,18 +477,23 @@ code/diagramスライド側にも字幕・キャラクター表示分の下部�
 video_pipeline/
 ├── config.py            # モデル名・ループ回数・スコア閾値
 ├── claude_client.py      # Claude API呼び出しの共通処理（テキスト/JSON）
+├── gemini_client.py       # Gemini JSON呼び出しの共通処理(総合エージェントのクロスチェック専用。画像生成はimage_generator.py/thumbnail_generator.pyが別途独立して行う)
 ├── image_generator.py    # Gemini(Nano Banana系)によるスライド背景生成
 ├── voicevox_client.py     # ローカルVOICEVOX ENGINEのHTTP APIクライアント(テキスト補正も含む)
 ├── character_renderer.py # 立ち絵PSDから口開閉2状態のPNGを合成(psd-tools)
-├── article_assets.py     # 記事からコードブロック・mermaid図を決定的に抽出
+├── character_emotion_assets.py # 台本の感情タグに応じた立ち絵(喜び/驚き/悲しみ/怒り)をGeminiで生成・キャッシュ
+├── article_assets.py     # 記事からコードブロック・mermaid図・表・画像URLを決定的に抽出
 ├── code_renderer.py       # コードをシンタックスハイライト付き画像に描画(pygments)
 ├── diagram_renderer.py    # mermaid図をmermaid.ink経由でPNG画像に変換
-├── script_parser.py       # script.mdをシーン・セリフに決定的にパース(正規表現)
+├── table_renderer.py      # 記事中のMarkdown表をPillowで画像に描画
+├── image_downloader.py    # 記事中の画像URL(外部http(s)のみ)をダウンロード
+├── script_parser.py       # script.mdをシーン・セリフ(+感情タグ)に決定的にパース(正規表現)
 ├── interactive.py         # 矢印キー選択メニュー(questionary)。articles/やoutput/の選択に使う
+├── subtitle_layout.py     # 字幕の折り返し・行数計算(video_assemblerの字幕焼き込みとslide_image_builderの下部余白計算で共有)
 ├── video_assembler.py     # 台本+スライド+音声(+立ち絵)から字幕付き動画をffmpegで組み立て
 ├── io_utils.py            # ファイル入出力
 ├── loop.py                # 生成→評価→修正ループの共通ロジック
-├── slide_image_builder.py # スライド内容(JSON、4レイアウト対応) -> PNG画像(Pillowで直接描画)
+├── slide_image_builder.py # スライド内容(JSON、bullets/stat/quote/comparison+code/diagram/table/imageの8レイアウト対応) -> PNG画像(Pillowで直接描画)
 ├── thumbnail_generator.py # サムネイル(16:9)を組み立て(背景+文字+立ち絵)
 ├── shorts_generator.py    # shorts_data.jsonから上段=フック文言/中段=スライド文字/下段=キャラクターの9:16ショートを組み立て
 ├── assets/fonts/          # Noto Sans JP(スライド用:可変フォント、字幕用:静的Bold/Regular)
@@ -523,6 +597,14 @@ VOICEVOXの音声を使う場合、利用規約で決まった表記（「VOICEV
 ため、`.env`の`TSUMUGI_ILLUSTRATOR_CREDIT`・`ZUNDAMON_ILLUSTRATOR_CREDIT`に
 配布元ページやREADME記載の表記をそのまま設定する必要がある。未設定の場合は
 プレースホルダーが入るので、**投稿前に必ず確認して差し替えること**。
+
+`description.txt`の末尾には、クレジットに加えて「▼ 関連動画（ショート版URL）」
+「チャンネル登録はこちら」の導線も`description_agent.build_subscribe_block()`が
+決定的に（LLMに書かせず）付け足す。チャンネルURLは`.env`の`CHANNEL_URL`
+（未設定時は固定のデフォルトURL）から取得する。ショート版のURLは概要欄生成の
+時点ではまだアップロードされておらず実在しないため、元記事URLと同様に
+プレースホルダーが入る。**こちらも投稿前に、`create-shorts`でアップロードした
+ショート動画の実際のURLに差し替えること**。
 
 ## サムネイル生成
 
@@ -655,32 +737,52 @@ uv run create-shorts
   口パクが発話区間と一致すること、末尾で音声が滑らかにフェードアウトすることを
   検証済み
 
-## 記事のコード・図をスライドに貼り付ける
+## 記事のコード・図・表・画像をスライドに貼り付ける
 
-台本のセリフが記事中の具体的なコードやmermaid図に言及している場合、それを
-説明する文章をbulletsに書くのではなく、**記事に載っている実物**をスライドに
-表示できる。`video-pipeline`実行時に自動で行われる（オプション不要）。
+台本のセリフが記事中の具体的なコード・mermaid図・表・画像に言及している場合、
+それを説明する文章をbulletsに書くのではなく、**記事に載っている実物**を
+スライドに表示できる。`video-pipeline`実行時に自動で行われる（オプション不要）。
 
 流れ:
-1. `article_assets.py`が記事のMarkdownを正規表現で決定的にパースし、
-   フェンス付きコードブロック(`python`などの言語指定つきコードブロック)と
-   mermaid図(`mermaid`指定のコードブロック)を、直前の見出しとあわせて抜き出す
-2. その一覧(`code_ref`/`diagram_ref`という番号付き)を`slides_agent`に渡し、
-   台本が具体的に言及しているスライドでは"code"/"diagram"レイアウトを選び、
-   該当する番号を参照させる（存在しない番号を創作することは禁止している）
-3. スライド内容が確定した後、`code_ref`/`diagram_ref`を実際の画像に解決する:
+1. `article_assets.py`が記事のMarkdownを正規表現で決定的にパースし、以下を
+   直前の見出しとあわせて抜き出す
+   - フェンス付きコードブロック(`python`などの言語指定つきコードブロック)
+   - mermaid図(`mermaid`指定のコードブロック)
+   - Markdownの表(パイプ区切りの表)
+   - 外部URLの画像(`![alt](https://...)`形式のみ。記事執筆環境依存で
+     ダウンロードできないローカル相対パスの画像は対象外)
+2. その一覧(`code_ref`/`diagram_ref`/`table_ref`/`image_ref`という番号付き)を
+   `slides_agent`に渡し、台本が具体的に言及しているスライドでは
+   "code"/"diagram"/"table"/"image"レイアウトを選び、該当する番号を
+   参照させる（存在しない番号を創作することは禁止している）
+3. スライド内容が確定した後、各参照番号を実際の画像に解決する(`pipeline.py`の
+   `_resolve_media_slides()`):
    - コードは`code_renderer.py`がpygmentsでシンタックスハイライトした画像を
      Pillowで直接描画する(等紙フォントはJetBrains Mono、日本語コメントが
      混在してもNoto Sans JPで補完する)
    - mermaid図は`diagram_renderer.py`が公開サービス
      [mermaid.ink](https://mermaid.ink)にmermaid記法を送って画像を取得する
      (ローカルにNode.js/ブラウザを用意しなくて済む)
-4. 参照番号が存在しない場合や、mermaid.inkへの接続に失敗した場合は、その
-   スライドを自動的に"bullets"にフォールバックする(動画組み立てを止めない)
+   - 表は`table_renderer.py`がPillowで直接描画する(列幅は内容に応じて
+     自動計算、見た目のトーンを他のスライドと合わせるため同じNoto Sans JPを使用)
+   - 画像は`image_downloader.py`が記事中のURLからそのままダウンロードする
+4. 参照番号が存在しない場合、mermaid.inkへの接続に失敗した場合、画像の
+   ダウンロードに失敗した場合は、そのスライドを自動的に"bullets"に
+   フォールバックする(動画組み立てを止めない)
 
-mermaid図のレンダリングは外部の公開サービスに依存するため、ネットワークが
-使えない環境では失敗してスキップされる(このサンドボックス環境では
-mermaid.inkに到達できず未検証。実際のネットワーク環境で確認してほしい)。
+mermaid図のレンダリング・画像ダウンロードは外部サービス/URLへの接続に
+依存するため、ネットワークが使えない環境や参照先が失効している場合は
+失敗してスキップされる。表の描画はローカルのPillowのみで完結するため
+外部ネットワークには依存しない。
+
+code/diagram/table/imageのいずれのレイアウトも、下部に字幕（+立ち絵素材が
+あればその分も）と重ならないよう表示領域を自動的に狭める。`subtitle_layout.py`
+がscript.mdの各シーンの実際のセリフを字幕焼き込みと同じロジックで折り返し、
+シーンごとの最大行数を計算する。これを`slide_image_builder.py`がスライド生成時に
+下部の予約領域（`SUBTITLE_MARGIN_V + 行数 × 行の高さ`。立ち絵素材がある場合は
+そちらの必要領域との大きい方）として使うことで、長いセリフが表示される
+シーンほど自動的に表示領域を狭くする（字幕・立ち絵の折り返し計算を
+2箇所で別々に持つと将来ズレる可能性があったため、1箇所に集約した）。
 
 ## トラブルシューティング
 
@@ -834,15 +936,26 @@ ffmpeg -filters | grep ass   # ass / subtitles が表示されればOK
 - スライド数が多い記事ではJSON応答が長くなり、`max_tokens`に到達して出力が
   途中で切れることがあった。`claude_client.py`がレスポンスの`stop_reason`を
   見て自動的にトークン上限を倍増しながら再生成するようにして対処している
-  （`MAX_TOKENS_CEILING`まで。それでも切れる場合は警告を出しつつ不完全な
-  内容のまま処理を続ける）
+  （`MAX_TOKENS_CEILING`まで。現在は`config.MAX_TOKENS`・`MAX_TOKENS_CEILING`
+  ともに20000（非ストリーミングAPIの上限21333未満に収め、ストリーミング対応を
+  避けるための値）。それでも切れる場合は警告を出しつつ不完全な内容のまま
+  処理を続ける）
+
+- `pipeline.run_pipeline()`は`pregenerated_script`引数で、台本エージェントの
+  生成→評価→修正ループを丸ごとスキップし、既に確定済みの台本テキストを
+  そのまま使わせることができる（スコアは100扱い。スライド・VOICEVOXテキスト・
+  総合チェック・タイトル・概要欄など後続のエージェントは通常通り動く）。
+  ただし`video-pipeline` CLI(`main.py`)には対応する引数が無く、現時点では
+  Pythonから`run_pipeline()`を直接呼び出す場合のみ使える
 
 - 以前は`python-pptx`で`.pptx`を組み立てていたが、Mac上のPowerPointで開けない
   事例があったため、直接PNG画像を書き出す方式(`slide_image_builder.py`)に
   変更した。日本語フォントはOS依存を避けるためNoto Sans JPを同梱している
-- スライドはNotebookLMのVideo Overviewを参考に、内容に応じて4種類のレイアウト
-  （箇条書き/数値強調/引用/比較）を`slides_agent`が選んで生成する。
-  配色やフォントサイズを変えたい場合は`slide_image_builder.py`の定数を編集する
+- スライドはNotebookLMのVideo Overviewを参考に、内容に応じて基本4種類の
+  レイアウト（箇条書き/数値強調/引用/比較）を`slides_agent`が選んで生成する。
+  これに加えて、記事中の実物を貼るcode/diagram/table/imageの4レイアウト
+  （詳細は「記事のコード・図・表・画像をスライドに貼り付ける」参照）を合わせて
+  計8種類。配色やフォントサイズを変えたい場合は`slide_image_builder.py`の定数を編集する
 - 概要欄エージェントは総合エージェントの整合性チェック対象には含めていない
   （確定した台本だけを見て作るため、台本と概要欄の食い違いはチェックされるが、
   スライド・VOICEVOXテキストとの整合性チェックは対象外）
