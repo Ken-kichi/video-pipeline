@@ -60,9 +60,19 @@ def _column_widths(
     body_font: ImageFont.FreeTypeFont,
     target_total_width: int,
 ) -> list[int]:
-    """列内容に応じた比率で、指定した合計幅に収まる列幅を決める。"""
+    """列内容に応じた比率で、指定した合計幅に収まる列幅を決める。
+
+    列数が多い表では、MIN_COL_WIDTHをそのまま全列の下限にすると
+    (col_count * MIN_COL_WIDTH > target_total_widthとなり)合計が
+    target_total_widthを超えてしまい、この関数の「指定した合計幅に収める」
+    という契約に違反してしまう。実効的な下限をtarget_total_width/col_count
+    まで下げることでこれを防ぐ(結果、極端に列数が多い表では個々の列幅が
+    MIN_COL_WIDTHを下回ることがあるが、合計がtarget_total_widthを超えない
+    ことを優先する)。
+    """
     col_count = len(all_rows[0])
-    preferred = [float(MIN_COL_WIDTH)] * col_count
+    effective_min_width = min(float(MIN_COL_WIDTH), target_total_width / col_count)
+    preferred = [effective_min_width] * col_count
     for row_index, row in enumerate(all_rows):
         font = header_font if row_index == 0 else body_font
         for col_index in range(col_count):
@@ -74,7 +84,7 @@ def _column_widths(
 
     total_preferred = sum(preferred)
     scale = target_total_width / total_preferred
-    return [max(MIN_COL_WIDTH, int(w * scale)) for w in preferred]
+    return [max(1, int(w * scale)) for w in preferred]
 
 
 def render_table_image(
