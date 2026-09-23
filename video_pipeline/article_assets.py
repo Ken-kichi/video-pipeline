@@ -11,7 +11,13 @@ LLMには依存しない。
 import re
 from dataclasses import dataclass
 
-_FENCE_RE = re.compile(r"^```(\S*)\s*$")
+# 開始フェンスはbacktick3つ以上(CommonMark準拠)。長さを覚えておき、閉じ側の
+# 判定(_FENCE_CLOSE_RE)で同じ長さ以上のフェンスでなければ閉じたとみなさない
+# ようにする(でないと、記事中に「コードブロックの書き方」を説明するような
+# ネストしたフェンス例があると、内側の閉じで外側が閉じたと誤判定され、
+# 以降の記事全体のパースが壊れてしまう不具合があった)。
+_FENCE_OPEN_RE = re.compile(r"^(`{3,})(\S*)\s*$")
+_FENCE_CLOSE_RE = re.compile(r"^(`{3,})\s*$")
 _HEADING_RE = re.compile(r"^(#{1,6})\s+(.+?)\s*$")
 _TABLE_SEPARATOR_CELL_RE = re.compile(r"^:?-{2,}:?$")
 # 記事中の画像記法(![alt](https://...))から、外部URLの画像だけを拾う
@@ -94,6 +100,7 @@ def extract_article_assets(
     current_heading = ""
     in_fence = False
     fence_lang = ""
+    fence_marker = ""
     buffer: list[str] = []
 
     lines = article_text.splitlines()
@@ -110,19 +117,29 @@ def extract_article_assets(
                 continue
 
         fence_match = (
-            _FENCE_RE.match(raw_line.strip())
-            if raw_line.strip().startswith("```")
+            _FENCE_OPEN_RE.match(raw_line.strip())
+            if raw_line.strip().startswith("`" * 3)
             else None
         )
 
         if not in_fence and fence_match:
             in_fence = True
-            fence_lang = fence_match.group(1).strip().lower()
+            fence_marker = fence_match.group(1)
+            fence_lang = fence_match.group(2).strip().lower()
             buffer = []
             i += 1
             continue
 
-        if in_fence and raw_line.strip() == "```":
+        fence_close_match = (
+            _FENCE_CLOSE_RE.match(raw_line.strip())
+            if raw_line.strip().startswith("`" * 3)
+            else None
+        )
+        if (
+            in_fence
+            and fence_close_match
+            and len(fence_close_match.group(1)) >= len(fence_marker)
+        ):
             in_fence = False
             code_text = "\n".join(buffer)
             if fence_lang == "mermaid":
