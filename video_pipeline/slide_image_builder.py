@@ -169,8 +169,18 @@ def _block_height(lines: list[str], font: ImageFont.FreeTypeFont) -> int:
 
 
 def _fit_image(image_path: str, max_width: int, max_height: int) -> Image.Image:
-    """アスペクト比を保ったまま指定サイズ内に収まるようリサイズする。"""
-    img = Image.open(image_path).convert("RGB")
+    """アスペクト比を保ったまま指定サイズ内に収まるようリサイズする。
+
+    透過PNG(RGBA、記事からダウンロードしたロゴ・アイコン等でよくある)は
+    アルファチャンネルを保ったまま返す(呼び出し側の_render_media_layoutが
+    マスクとして使い、下地に自然に馴染ませる)。以前は常にRGBへ変換していた
+    ため、PillowのRGBA→RGB変換がアルファを合成せず単純に破棄する仕様と
+    相まって、透過部分の下にある生のRGB値(エンコーダ依存で黒であることが
+    多い)がそのまま残り、意図しない黒背景として描画されてしまっていた。
+    """
+    img = Image.open(image_path)
+    if img.mode != "RGBA":
+        img = img.convert("RGB")
     img.thumbnail((max_width, max_height), Image.LANCZOS)
     return img
 
