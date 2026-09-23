@@ -230,8 +230,16 @@ def read_scene_end_time(scene_boundaries_path: str | Path, scene_number: int) ->
     return None
 
 
+# 見出しレベル・空白の柔軟さはscript_parser.SCENE_HEADER_RE
+# (r"^#{1,4}\s*シーン\s*(\d+)")と揃えている。以前はここだけ"### "
+# (半角スペース込みで3個の#)への完全一致にしていたため、render-video側の
+# 実際のパース(script_parser)は問題なく動作する一方、見出しレベルが
+# 3個の#以外に変わった場合(将来プロンプトが変更された場合や手動編集時)に
+# ここだけ1件もマッチせずfind_overview_end_scene()がフォールバック(return 1)
+# してしまい、本来複数シーンにまたがるはずの概要パートショートがシーン1だけに
+# 静かに切り詰められる不具合があった。
 _SCENE_HEADING_TIME_RE = re.compile(
-    r"^### シーン(\d+)[：:].*?[\(（](\d+):(\d+)", re.MULTILINE
+    r"^#{1,4}\s*シーン\s*(\d+)[：:].*?[\(（](\d+):(\d+)", re.MULTILINE
 )
 
 

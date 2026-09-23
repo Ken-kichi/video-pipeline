@@ -691,6 +691,22 @@ def _build_visual_timeline(
             continue
 
         per_slide = max(total / len(files), MIN_SLIDE_DURATION_SECONDS)
+        if per_slide * len(files) > total:
+            # MIN_SLIDE_DURATION_SECONDSの下限を適用すると、このシーンの
+            # スライド表示時間の合計が音声の実尺(total)を超えてしまう
+            # (1シーンに割り当てられたスライド枚数が多い割にシーンの実時間が
+            # 短い場合に起こりうる)。音声トラックと無音の映像トラックは
+            # それぞれ独立に結合されるため、ここでオーバーランを許すと
+            # 以降の全シーンでスライド表示と該当セリフの音声がズレていく
+            # (誤ったスライドが表示された状態で別のセリフの音声が流れる)。
+            # 下限より音声との同期を優先し、均等割りにフォールバックする。
+            print(
+                f"  [警告] シーン{scene_number}はスライド{len(files)}枚に対し実時間が"
+                f"{total:.2f}秒と短いため、MIN_SLIDE_DURATION_SECONDS"
+                f"({MIN_SLIDE_DURATION_SECONDS}秒)の下限を適用せず均等割りします"
+                "(音声とのズレを防ぐため)"
+            )
+            per_slide = total / len(files)
         for file_name in files:
             visual_timeline.append((slides_dir / file_name, per_slide))
 

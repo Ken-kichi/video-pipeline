@@ -57,7 +57,11 @@ DEFAULT_VIDEO_TITLE = "解説動画"
 
 
 def _run_integration_loop(
-    article_text: str, script: str, slides: list[dict], voicevox_text: str
+    article_text: str,
+    script: str,
+    slides: list[dict],
+    voicevox_text: str,
+    asset_summary: str = "",
 ) -> tuple[str, list[dict], str, int, list[dict]]:
     """総合エージェントによる整合性チェック→(必要なら)修正ループ。
 
@@ -104,7 +108,9 @@ def _run_integration_loop(
             script = script_agent.revise(article_text, script, script_feedback)
         if slides_feedback:
             print("  スライドを修正中...")
-            slides = slides_agent.revise(script, slides, slides_feedback)
+            slides = slides_agent.revise(
+                script, slides, slides_feedback, asset_summary
+            )
         if voicevox_feedback:
             print("  VOICEVOXテキストを修正中...")
             voicevox_text = voicevox_agent.revise(
@@ -286,7 +292,9 @@ def run_pipeline(
 
     print("=== 総合エージェント（整合性チェック） ===")
     script, slides, voicevox_text, integration_score, integration_history = (
-        _run_integration_loop(article_text, script, slides, voicevox_text)
+        _run_integration_loop(
+            article_text, script, slides, voicevox_text, asset_summary
+        )
     )
 
     if video_title is None:
@@ -309,7 +317,11 @@ def run_pipeline(
         f"{description_agent.build_credits_block()}"
     )
 
-    output_dir_path = Path(output_dir) / datetime.now().strftime("%Y%m%d_%H%M%S")
+    # 秒単位だけだと、バッチスクリプトでの連続実行や複数ターミナルからの
+    # ほぼ同時実行で同一ディレクトリに解決され、書き込みが無警告で衝突・
+    # 混在してしまう不具合があった。マイクロ秒まで含めることで、同一プロセス内で
+    # 連続実行しても実質的に衝突しない解像度にする。
+    output_dir_path = Path(output_dir) / datetime.now().strftime("%Y%m%d_%H%M%S_%f")
 
     if codes or diagrams or tables or images:
         print("=== 記事中のコード・図・表・画像をスライドに反映 ===")

@@ -11,7 +11,13 @@ LLMには依存しない。
 import re
 from dataclasses import dataclass
 
-_FENCE_RE = re.compile(r"^```(\S*)\s*$")
+# 開始フェンスはbacktick3つ以上(CommonMark準拠)。長さを覚えておき、閉じ側の
+# 判定(_FENCE_CLOSE_RE)で同じ長さ以上のフェンスでなければ閉じたとみなさない
+# ようにする(でないと、記事中に「コードブロックの書き方」を説明するような
+# ネストしたフェンス例があると、内側の閉じで外側が閉じたと誤判定され、
+# 以降の記事全体のパースが壊れてしまう不具合があった)。
+_FENCE_OPEN_RE = re.compile(r"^(`{3,})(\S*)\s*$")
+_FENCE_CLOSE_RE = re.compile(r"^(`{3,})\s*$")
 _HEADING_RE = re.compile(r"^(#{1,6})\s+(.+?)\s*$")
 _TABLE_SEPARATOR_CELL_RE = re.compile(r"^:?-{2,}:?$")
 # 記事中の画像記法(![alt](https://...))から、外部URLの画像だけを拾う
@@ -60,15 +66,32 @@ def _clean_cell_text(cell: str) -> str:
     return _BOLD_MARKER_RE.sub(r"\1", cell)
 
 
+# `\|`(セル内に文字通りの`|`を書くためのMarkdown標準のエスケープ記法)を
+# 区切り文字として誤って分割してしまわないよう、分割前に一時的な記号へ
+# 退避させ、分割後に`|`へ戻す(_ESCAPED_PIPE_PLACEHOLDERは記事本文に
+# 現れないよう制御文字を使う)。
+_ESCAPED_PIPE_PLACEHOLDER = "\x00"
+
+
 def _split_table_row(line: str) -> list[str]:
     """`| a | b |`のような行をセルのリストに分割する(前後の空セルは除去)。"""
-    stripped = line.strip().removeprefix("|").removesuffix("|")
-    return [_clean_cell_text(cell.strip()) for cell in stripped.split("|")]
+    protected = line.strip().replace("\\|", _ESCAPED_PIPE_PLACEHOLDER)
+    stripped = protected.removeprefix("|").removesuffix("|")
+    return [
+        _clean_cell_text(cell.strip().replace(_ESCAPED_PIPE_PLACEHOLDER, "|"))
+        for cell in stripped.split("|")
+    ]
 
 
 def _is_table_separator_row(line: str) -> bool:
-    """`|---|---|`のような区切り行かどうかを判定する。"""
-    if "|" not in line and "-" not in line:
+    """`|---|---|`のような区切り行かどうかを判定する。
+
+    `|`を1つも含まない行(単独の`---`等、Markdownの水平線)は区切り行として
+    扱わない。シェルのパイプを説明する文(`` `ls | grep foo` ``)の直後に
+    空行無しで水平線`---`が続くケースで、地の文+水平線を1列・0行の表として
+    誤検出してしまう不具合があったため。
+    """
+    if "|" not in line:
         return False
     cells = _split_table_row(line)
     if not cells:
@@ -94,6 +117,7 @@ def extract_article_assets(
     current_heading = ""
     in_fence = False
     fence_lang = ""
+    fence_marker = ""
     buffer: list[str] = []
 
     lines = article_text.splitlines()
@@ -110,19 +134,29 @@ def extract_article_assets(
                 continue
 
         fence_match = (
-            _FENCE_RE.match(raw_line.strip())
-            if raw_line.strip().startswith("```")
+            _FENCE_OPEN_RE.match(raw_line.strip())
+            if raw_line.strip().startswith("`" * 3)
             else None
         )
 
         if not in_fence and fence_match:
             in_fence = True
-            fence_lang = fence_match.group(1).strip().lower()
+            fence_marker = fence_match.group(1)
+            fence_lang = fence_match.group(2).strip().lower()
             buffer = []
             i += 1
             continue
 
-        if in_fence and raw_line.strip() == "```":
+        fence_close_match = (
+            _FENCE_CLOSE_RE.match(raw_line.strip())
+            if raw_line.strip().startswith("`" * 3)
+            else None
+        )
+        if (
+            in_fence
+            and fence_close_match
+            and len(fence_close_match.group(1)) >= len(fence_marker)
+        ):
             in_fence = False
             code_text = "\n".join(buffer)
             if fence_lang == "mermaid":
@@ -150,13 +184,18 @@ def extract_article_assets(
             i += 1
             continue
 
+        candidate_header = _split_table_row(raw_line) if "|" in raw_line else []
         if (
             "|" in raw_line
             and raw_line.strip()
             and i + 1 < n
             and _is_table_separator_row(lines[i + 1])
+            # 区切り行の列数がヘッダー候補行と一致しない場合は表とみなさない
+            # (地の文にたまたま含まれる`|`と、直後の無関係な水平線が誤って
+            # 表として検出されるのを防ぐ)。
+            and len(_split_table_row(lines[i + 1])) == len(candidate_header)
         ):
-            header = _split_table_row(raw_line)
+            header = candidate_header
             i += 2
             rows: list[list[str]] = []
             while i < n and "|" in lines[i] and lines[i].strip():

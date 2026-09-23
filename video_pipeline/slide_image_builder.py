@@ -169,8 +169,18 @@ def _block_height(lines: list[str], font: ImageFont.FreeTypeFont) -> int:
 
 
 def _fit_image(image_path: str, max_width: int, max_height: int) -> Image.Image:
-    """アスペクト比を保ったまま指定サイズ内に収まるようリサイズする。"""
-    img = Image.open(image_path).convert("RGB")
+    """アスペクト比を保ったまま指定サイズ内に収まるようリサイズする。
+
+    透過PNG(RGBA、記事からダウンロードしたロゴ・アイコン等でよくある)は
+    アルファチャンネルを保ったまま返す(呼び出し側の_render_media_layoutが
+    マスクとして使い、下地に自然に馴染ませる)。以前は常にRGBへ変換していた
+    ため、PillowのRGBA→RGB変換がアルファを合成せず単純に破棄する仕様と
+    相まって、透過部分の下にある生のRGB値(エンコーダ依存で黒であることが
+    多い)がそのまま残り、意図しない黒背景として描画されてしまっていた。
+    """
+    img = Image.open(image_path)
+    if img.mode != "RGBA":
+        img = img.convert("RGB")
     img.thumbnail((max_width, max_height), Image.LANCZOS)
     return img
 
@@ -447,13 +457,20 @@ def _render_media_layout(
         caption_height = caption_font_height + 20
 
     image_path = slide_data.get(image_path_key)
+    media = None
     if image_path and Path(image_path).exists():
-        max_w = SLIDE_WIDTH - MARGIN * 2
-        reserved = _media_bottom_reserved_space(subtitle_max_lines)
-        max_h = max(
-            MIN_MEDIA_CONTENT_HEIGHT, SLIDE_HEIGHT - y - reserved - caption_height
-        )
-        media = _fit_image(image_path, max_w, max_h)
+        try:
+            max_w = SLIDE_WIDTH - MARGIN * 2
+            reserved = _media_bottom_reserved_space(subtitle_max_lines)
+            max_h = max(
+                MIN_MEDIA_CONTENT_HEIGHT, SLIDE_HEIGHT - y - reserved - caption_height
+            )
+            media = _fit_image(image_path, max_w, max_h)
+        except Exception as exc:  # noqa: BLE001 画像が壊れていてもスライド生成全体は止めない
+            print(f"  [警告] 画像の読み込みに失敗しました({image_path}): {exc}")
+            media = None
+
+    if media is not None:
         media_x = (SLIDE_WIDTH - media.width) // 2
         media_y = y + max(0, (max_h - media.height) // 2)
         if media.mode == "RGBA":

@@ -94,9 +94,10 @@ def call_json(
 ) -> dict:
     """Claudeに『JSONのみ』を返すよう依頼し、パース済みdictを返す。
 
-    パースに失敗した場合は、失敗した旨をClaudeに伝えて再試行する
-    (max_tokens到達による打ち切りは_generate_with_truncation_retry側で
-    別途トークン上限を増やして対処される)。
+    パースに失敗した場合(JSON構文として不正な場合はもちろん、構文的には
+    正しいJSONでもトップレベルがdictでない場合も含む)、失敗した旨を
+    Claudeに伝えて再試行する(max_tokens到達による打ち切りは
+    _generate_with_truncation_retry側で別途トークン上限を増やして対処される)。
     """
     full_system = (
         system + "\n\n重要: 出力はJSONオブジェクトのみとすること。"
@@ -109,7 +110,14 @@ def call_json(
         last_raw = raw
         cleaned = _strip_code_fence(raw)
         try:
-            return json.loads(cleaned)
+            parsed = json.loads(cleaned)
+            if not isinstance(parsed, dict):
+                raise json.JSONDecodeError(
+                    f"expected a JSON object, got {type(parsed).__name__}",
+                    cleaned,
+                    0,
+                )
+            return parsed
         except json.JSONDecodeError:
             if attempt == retries:
                 break

@@ -111,10 +111,15 @@ def main() -> None:
             raise SystemExit(1) from exc
 
         # render_character_statesは"closed.png"/"open.png"という固定名で書き出すため、
-        # キャラクターごとに区別できるプレフィックス付きの名前にリネームする
+        # キャラクターごとに区別できるプレフィックス付きの名前にリネームする。
+        # Path.rename()は宛先が既に存在する場合、POSIX(macOS/Linux)では暗黙に
+        # 上書きするが、Windowsでは`FileExistsError`を送出する。口レイヤー名の
+        # オプションを変えて同じキャラクターに対して再実行した場合などに
+        # 発生しうるため、Path.replace()(Windowsでもアトミックに上書きする)を
+        # 使う。
         for state, path in result.items():
             renamed = CHARACTER_ASSETS_DIR / f"{prefix}_{state}.png"
-            path.rename(renamed)
+            path.replace(renamed)
             print(f"  -> {renamed}")
         did_any = True
 
