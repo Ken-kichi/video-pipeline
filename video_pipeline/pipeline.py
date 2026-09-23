@@ -309,7 +309,11 @@ def run_pipeline(
         f"{description_agent.build_credits_block()}"
     )
 
-    output_dir_path = Path(output_dir) / datetime.now().strftime("%Y%m%d_%H%M%S")
+    # 秒単位だけだと、バッチスクリプトでの連続実行や複数ターミナルからの
+    # ほぼ同時実行で同一ディレクトリに解決され、書き込みが無警告で衝突・
+    # 混在してしまう不具合があった。マイクロ秒まで含めることで、同一プロセス内で
+    # 連続実行しても実質的に衝突しない解像度にする。
+    output_dir_path = Path(output_dir) / datetime.now().strftime("%Y%m%d_%H%M%S_%f")
 
     if codes or diagrams or tables or images:
         print("=== 記事中のコード・図・表・画像をスライドに反映 ===")
