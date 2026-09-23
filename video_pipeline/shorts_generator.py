@@ -43,6 +43,7 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont
 
+from video_pipeline import character_emotion_assets
 from video_pipeline.video_assembler import (
     CHARACTER_PREFIXES,
     VIDEO_FPS,
@@ -566,6 +567,27 @@ def _build_character_video(
                 continue
             talk_intervals.setdefault(speaker, []).append(rebased)
 
+    # 表情差分の立ち絵(あれば)を、対応する感情のセリフの区間だけ通常表情の
+    # 上から重ねる(video_assembler._group_non_neutral_emotion_intervalsと
+    # 同じ考え方。display_intervals(次の話者まで延長した表示区間)ではなく、
+    # そのセリフ自体の区間(item["start"]〜["end"])を使う点に注意)。
+    emotion_intervals: dict[str, dict[str, dict[str, list[tuple[float, float]]]]] = {}
+    for item in speaker_timeline:
+        speaker = item["speaker"]
+        emotion = item.get("emotion") or "neutral"
+        if emotion == "neutral":
+            continue
+        rebased_span = _rebase_interval(item["start"], item["end"], window_start, window_end, speed)
+        if rebased_span is None:
+            continue
+        bucket = emotion_intervals.setdefault(speaker, {}).setdefault(emotion, {"closed": [], "open": []})
+        bucket["closed"].append(rebased_span)
+        mouth_open_intervals = item.get("mouth_open_intervals") or [(item["start"], item["end"])]
+        for start, end in mouth_open_intervals:
+            rebased = _rebase_interval(start, end, window_start, window_end, speed)
+            if rebased is not None:
+                bucket["open"].append(rebased)
+
     x_expr = "(main_w-overlay_w)/2"
     y_expr = "main_h-overlay_h"
 
@@ -615,6 +637,36 @@ def _build_character_video(
             talk_intervals.get(speaker, []),
             f"bg{stage}o",
         )
+
+        prefix = CHARACTER_PREFIXES.get(speaker, speaker)
+        for emotion, intervals in emotion_intervals.get(speaker, {}).items():
+            closed_e_path = character_emotion_assets.get_emotion_asset_path(prefix, emotion, "closed")
+            open_e_path = character_emotion_assets.get_emotion_asset_path(prefix, emotion, "open")
+            if closed_e_path is None or open_e_path is None:
+                continue
+            closed_e_path = _crop_character_image(closed_e_path, work_dir)
+            open_e_path = _crop_character_image(open_e_path, work_dir)
+
+            ffmpeg_inputs += ["-loop", "1", "-i", str(closed_e_path)]
+            closed_e_idx = input_index
+            input_index += 1
+            ffmpeg_inputs += ["-loop", "1", "-i", str(open_e_path)]
+            open_e_idx = input_index
+            input_index += 1
+
+            closed_e_label = f"{stage}e{emotion}c"
+            open_e_label = f"{stage}e{emotion}o"
+            filter_stages.append(f"[{closed_e_idx}:v]scale=-2:{CHARACTER_SHORTS_HEIGHT}[{closed_e_label}]")
+            filter_stages.append(f"[{open_e_idx}:v]scale=-2:{CHARACTER_SHORTS_HEIGHT}[{open_e_label}]")
+
+            current_label = append_overlay_stage(
+                filter_stages, current_label, closed_e_label, x_expr, y_expr,
+                intervals["closed"], f"bg{stage}e{emotion}c",
+            )
+            current_label = append_overlay_stage(
+                filter_stages, current_label, open_e_label, x_expr, y_expr,
+                intervals["open"], f"bg{stage}e{emotion}o",
+            )
         stage += 1
 
     filter_stages.append(f"[{current_label}]format=yuv420p[vout]")

@@ -9,15 +9,24 @@ script.mdのフォーマットはscript_agentのプロンプトでこちらが�
 想定フォーマット(script_agentが一貫してこの形式で出力する前提):
   ### シーン<N>：<タイトル>（<開始時刻>〜<終了時刻>）
   つむぎ「セリフ」
-  ずんだもん「セリフのだ」
+  ずんだもん（驚き）「セリフのだ」
   【画面：...】 (読み上げ対象外なので無視する)
+
+セリフの感情表現(character_emotion_assets.py参照)のため、話者名の直後に
+任意で（喜び|驚き|悲しみ|怒り）の感情タグを付けられる(省略時はneutral=
+通常の立ち絵のまま)。render-videoの立ち絵オーバーレイが、このタグに応じて
+喜怒哀楽の表情差分に一時的に切り替える。
 """
 
 import re
 from dataclasses import dataclass, field
 
 SCENE_HEADER_RE = re.compile(r"^#{1,4}\s*シーン\s*(\d+)")
-DIALOGUE_RE = re.compile(r"^(つむぎ|ずんだもん)「(.+)」\s*$")
+DIALOGUE_RE = re.compile(r"^(つむぎ|ずんだもん)(?:（(喜び|驚き|悲しみ|怒り)）)?「(.+)」\s*$")
+
+# 台本上の日本語の感情タグ語 -> character_emotion_assets.pyのファイル名に
+# 使う英語キーへの対応。
+EMOTION_LABELS = {"喜び": "happy", "驚き": "surprised", "悲しみ": "sad", "怒り": "angry"}
 
 
 @dataclass
@@ -27,6 +36,8 @@ class ScriptLine:
     speaker: str
     text: str
     scene_number: int
+    # "neutral" | "happy" | "surprised" | "sad" | "angry"
+    emotion: str = "neutral"
 
 
 @dataclass
@@ -59,10 +70,14 @@ def parse_script(script_text: str) -> list[Scene]:
 
         dialogue_match = DIALOGUE_RE.match(line)
         if dialogue_match and current_scene is not None:
-            speaker, text = dialogue_match.groups()
+            speaker, emotion_label, text = dialogue_match.groups()
+            emotion = EMOTION_LABELS.get(emotion_label, "neutral")
             current_scene.lines.append(
                 ScriptLine(
-                    speaker=speaker, text=text, scene_number=current_scene.number
+                    speaker=speaker,
+                    text=text,
+                    scene_number=current_scene.number,
+                    emotion=emotion,
                 )
             )
 

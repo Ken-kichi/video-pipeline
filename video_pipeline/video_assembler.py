@@ -39,6 +39,7 @@ import wave
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from video_pipeline import character_emotion_assets
 from video_pipeline.script_parser import flatten_lines, parse_script
 from video_pipeline.slide_image_builder import extract_shorts_text
 from video_pipeline.subtitle_layout import (
@@ -132,6 +133,10 @@ class TimedLine:
     # VOICEVOXのモーラ長から計算する(voicevox_client.mouth_open_intervals_from_query)。
     # 空の場合は呼び出し側でstart〜end全体を開けっぱなしにフォールバックする。
     mouth_open_intervals: list[tuple[float, float]] = field(default_factory=list)
+    # script_parser.ScriptLine.emotionをそのまま引き継ぐ("neutral"|"happy"|
+    # "surprised"|"sad"|"angry")。立ち絵オーバーレイ(character_emotion_assets.py)
+    # が、このセリフの区間だけ対応する表情差分の立ち絵に切り替える。
+    emotion: str = "neutral"
 
 
 def _wav_duration_seconds(path: Path) -> float:
@@ -154,6 +159,23 @@ def character_asset_paths() -> dict[str, dict[str, Path]]:
         if closed.exists() and open_.exists():
             assets[speaker] = {"closed": closed, "open": open_}
     return assets
+
+
+def _group_non_neutral_emotion_intervals(
+    timeline: list[TimedLine], speaker: str
+) -> dict[str, dict[str, list[tuple[float, float]]]]:
+    """`timeline`(TimedLineのリスト)から、指定話者の非neutral感情ごとに、
+    closedオーバーレイに使うセリフ全体の区間リストと、openオーバーレイに
+    使う口パク区間リストを集計する。neutralなセリフは対象外(通常の立ち絵が
+    ベースレイヤーのまま使われるため、追加のオーバーレイ段は不要)。"""
+    grouped: dict[str, dict[str, list[tuple[float, float]]]] = {}
+    for item in timeline:
+        if item.speaker != speaker or item.emotion == "neutral":
+            continue
+        bucket = grouped.setdefault(item.emotion, {"closed": [], "open": []})
+        bucket["closed"].append((item.start, item.end))
+        bucket["open"].extend(item.mouth_open_intervals or [(item.start, item.end)])
+    return grouped
 
 
 def build_enable_expr(intervals: list[tuple[float, float]]) -> str:
@@ -391,6 +413,7 @@ def synthesize_timeline(
                 end=cursor + duration,
                 audio_path=audio_path,
                 mouth_open_intervals=mouth_open_intervals,
+                emotion=line.emotion,
             )
         )
         audio_segments.append(audio_path)
@@ -561,6 +584,7 @@ def _write_shorts_data(
                 [round(start, 3), round(end, 3)]
                 for start, end in item.mouth_open_intervals
             ],
+            "emotion": item.emotion,
         }
         for item in timeline
     ]
@@ -975,6 +999,57 @@ def assemble_video(
             intervals,
             f"bg{input_index}o",
         )
+
+        # 表情差分の立ち絵(あれば)を、対応する感情のセリフの区間だけ
+        # 通常表情の上から重ねる。closed→openの順に重ねることで、同じ
+        # 感情内でも口パクが再現される(通常表情と同じ仕組み)。
+        prefix = CHARACTER_PREFIXES.get(speaker, speaker)
+        for emotion, emotion_intervals in _group_non_neutral_emotion_intervals(
+            timeline, speaker
+        ).items():
+            closed_e_path = character_emotion_assets.get_emotion_asset_path(
+                prefix, emotion, "closed"
+            )
+            open_e_path = character_emotion_assets.get_emotion_asset_path(
+                prefix, emotion, "open"
+            )
+            if closed_e_path is None or open_e_path is None:
+                continue
+
+            ffmpeg_inputs += ["-i", str(closed_e_path)]
+            closed_e_idx = input_index
+            input_index += 1
+            ffmpeg_inputs += ["-i", str(open_e_path)]
+            open_e_idx = input_index
+            input_index += 1
+
+            closed_e_label = f"chare{closed_e_idx}"
+            open_e_label = f"chare{open_e_idx}"
+            filter_stages.append(
+                f"[{closed_e_idx}:v]scale=-2:{CHARACTER_VIDEO_HEIGHT}[{closed_e_label}]"
+            )
+            filter_stages.append(
+                f"[{open_e_idx}:v]scale=-2:{CHARACTER_VIDEO_HEIGHT}[{open_e_label}]"
+            )
+
+            current_label = append_overlay_stage(
+                filter_stages,
+                current_label,
+                closed_e_label,
+                x_expr,
+                y_expr,
+                emotion_intervals["closed"],
+                f"bg{input_index}ec",
+            )
+            current_label = append_overlay_stage(
+                filter_stages,
+                current_label,
+                open_e_label,
+                x_expr,
+                y_expr,
+                emotion_intervals["open"],
+                f"bg{input_index}eo",
+            )
 
     filter_stages.append(
         f"[{current_label}]ass=filename={ass_path_arg}:fontsdir={fonts_dir_arg}[vout]"
