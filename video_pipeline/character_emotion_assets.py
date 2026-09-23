@@ -190,6 +190,14 @@ def get_emotion_asset_path(prefix: str, emotion: str, mouth_state: str) -> Path 
         return None
 
     raw_path = CHARACTER_ASSETS_DIR / f"_tmp_{prefix}_{emotion}_{mouth_state}.png"
+    # 最終画像もまず一時ファイルに書き込んでから、キャッシュ本パスへ
+    # アトミックにrenameする(Path.replace)。直接cachedへ保存すると、
+    # 書き込み中にプロセスが強制終了された場合(Ctrl-C・OOM killer・
+    # レンダリングタイムアウト等)、壊れた(途中までしか書かれていない)PNGが
+    # キャッシュ本パスに残ってしまう。get_emotion_asset_pathはキャッシュの
+    # 存在チェックしか行わない(内容の検証はしない)ため、一度壊れると
+    # 手動で削除するまで永久に壊れたファイルを返し続けてしまっていた。
+    final_tmp_path = CHARACTER_ASSETS_DIR / f"_tmp_final_{prefix}_{emotion}_{mouth_state}.png"
     try:
         for attempt in range(_MAX_GENERATION_ATTEMPTS):
             generated = generate_slide_image(
@@ -209,10 +217,12 @@ def get_emotion_asset_path(prefix: str, emotion: str, mouth_state: str) -> Path 
                 # (コストはかかるが)再試行する。
                 continue
             transparent = _chroma_key_to_alpha(img)
-            transparent.save(cached)
+            transparent.save(final_tmp_path)
+            final_tmp_path.replace(cached)
             return cached
         return None
     except Exception:  # noqa: BLE001 表情差し替えは演出上のおまけなので、失敗してもパイプライン全体を止めない
         return None
     finally:
         raw_path.unlink(missing_ok=True)
+        final_tmp_path.unlink(missing_ok=True)
