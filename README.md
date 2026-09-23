@@ -196,7 +196,9 @@ uv run video-pipeline
 （Claude用の`ANTHROPIC_API_KEY`とは別のキー）。文字は常にPillowで正確に描画する
 ため、背景画像に数値・専門用語を描かせる必要はない（詳細は下記「スライド背景生成について」）。
 
-実行するたびに `output/<yyyymmdd_hhmmss>/`（実行日時のディレクトリ）が新しく作られ、そこに成果物一式が保存される（ベースの `output` 部分は `--output-dir` で変更可）。
+実行するたびに `output/<yyyymmdd_hhmmss_ffffff>/`（実行日時のディレクトリ。末尾はマイクロ秒。
+秒単位だけだと連続実行時にディレクトリが衝突しうるため付与している）が新しく作られ、
+そこに成果物一式が保存される（ベースの `output` 部分は `--output-dir` で変更可）。
 
 ## 音声合成（VOICEVOX ENGINE連携）
 
