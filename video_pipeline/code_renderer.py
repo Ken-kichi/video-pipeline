@@ -80,24 +80,47 @@ def render_code_image(
     mono_font = _load_mono_font(CODE_FONT_SIZE)
     jp_font = _load_jp_font(CODE_FONT_SIZE)
     line_height = int(CODE_FONT_SIZE * CODE_LINE_SPACING)
+    max_text_width = max_width - CODE_PADDING * 2
+
+    # 幅計測用の使い捨てdraw(実際の描画キャンバスとは別。フォントの計測は
+    # 画像サイズに依存しないため、これで折り返し後の行数を先に確定できる)。
+    measure_draw = ImageDraw.Draw(Image.new("RGB", (1, 1)))
 
     lines = code.rstrip("\n").split("\n")
-    height = CODE_PADDING * 2 + line_height * max(1, len(lines))
-    img = Image.new("RGB", (max_width, height), CODE_BG_COLOR)
-    draw = ImageDraw.Draw(img)
 
-    # 行ごとにpygmentsでトークン化し、色付きで1文字ずつ描画する
-    x, y = CODE_PADDING, CODE_PADDING
+    # 各論理行をpygmentsでトークン化し、キャンバス幅を超える手前で複数の
+    # 描画行(visual row)に折り返す。以前はmax_widthに対する幅チェックが
+    # 無く、長い行はPillowの暗黙のクリッピングでキャンバス外に黙って
+    # 切り捨てられ、画面から見えなくなっていた。
+    visual_rows: list[list[tuple[str, str, ImageFont.FreeTypeFont]]] = []
     for line in lines:
+        current_row: list[tuple[str, str, ImageFont.FreeTypeFont]] = []
+        current_width = 0.0
         for token_type, value in lex(line, lexer):
             color = _token_color(token_type)
             for ch in value:
                 if ch == "\n":
                     continue
                 font = _char_font(ch, mono_font, jp_font)
-                draw.text((x, y), ch, font=font, fill=color)
-                x += draw.textlength(ch, font=font)
-        x = CODE_PADDING
+                ch_width = measure_draw.textlength(ch, font=font)
+                if current_row and current_width + ch_width > max_text_width:
+                    visual_rows.append(current_row)
+                    current_row = []
+                    current_width = 0.0
+                current_row.append((ch, color, font))
+                current_width += ch_width
+        visual_rows.append(current_row)  # 空行も1描画行として残す
+
+    height = CODE_PADDING * 2 + line_height * max(1, len(visual_rows))
+    img = Image.new("RGB", (max_width, height), CODE_BG_COLOR)
+    draw = ImageDraw.Draw(img)
+
+    x_start, y = CODE_PADDING, CODE_PADDING
+    for row in visual_rows:
+        x = x_start
+        for ch, color, font in row:
+            draw.text((x, y), ch, font=font, fill=color)
+            x += draw.textlength(ch, font=font)
         y += line_height
 
     output_path = Path(output_path)
