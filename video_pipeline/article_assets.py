@@ -60,10 +60,21 @@ def _clean_cell_text(cell: str) -> str:
     return _BOLD_MARKER_RE.sub(r"\1", cell)
 
 
+# `\|`(セル内に文字通りの`|`を書くためのMarkdown標準のエスケープ記法)を
+# 区切り文字として誤って分割してしまわないよう、分割前に一時的な記号へ
+# 退避させ、分割後に`|`へ戻す(_ESCAPED_PIPE_PLACEHOLDERは記事本文に
+# 現れないよう制御文字を使う)。
+_ESCAPED_PIPE_PLACEHOLDER = "\x00"
+
+
 def _split_table_row(line: str) -> list[str]:
     """`| a | b |`のような行をセルのリストに分割する(前後の空セルは除去)。"""
-    stripped = line.strip().removeprefix("|").removesuffix("|")
-    return [_clean_cell_text(cell.strip()) for cell in stripped.split("|")]
+    protected = line.strip().replace("\\|", _ESCAPED_PIPE_PLACEHOLDER)
+    stripped = protected.removeprefix("|").removesuffix("|")
+    return [
+        _clean_cell_text(cell.strip().replace(_ESCAPED_PIPE_PLACEHOLDER, "|"))
+        for cell in stripped.split("|")
+    ]
 
 
 def _is_table_separator_row(line: str) -> bool:
