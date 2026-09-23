@@ -49,6 +49,7 @@ from video_pipeline.video_assembler import (
     VIDEO_FPS,
     append_overlay_stage,
     character_asset_paths,
+    subtract_ranges,
 )
 
 SHORTS_WIDTH = 1080
@@ -617,6 +618,21 @@ def _build_character_video(
         filter_stages.append(f"[{closed_idx}:v]scale=-2:{CHARACTER_SHORTS_HEIGHT}[{closed_label}]")
         filter_stages.append(f"[{open_idx}:v]scale=-2:{CHARACTER_SHORTS_HEIGHT}[{open_label}]")
 
+        # 表情差分の立ち絵が表示される区間は、通常表情のベースレイヤーを
+        # 非表示にする(video_assemblerの同ロジックと同じ理由。でないと
+        # 同じ位置に2枚の立ち絵が同時に描画されて二重に見えてしまう)。
+        emotion_active_ranges = [
+            interval
+            for intervals_ in emotion_intervals.get(speaker, {}).values()
+            for interval in intervals_["closed"]
+        ]
+        # closed/openは別々の立ち絵素材でシルエットが厳密には一致しないため、
+        # closedの表示区間からはopenの区間も差し引いて排他的にする
+        # (video_assembler.subtract_rangesのdocstring参照)。
+        mouth_open_ranges = subtract_ranges(
+            talk_intervals.get(speaker, []), emotion_active_ranges
+        )
+
         # 区間数が多い場合ffmpegの式パーサが壊れるため、append_overlay_stageで
         # MAX_ENABLE_EXPR_TERMSごとにoverlay段を分割する(video_assembler参照)
         current_label = append_overlay_stage(
@@ -625,7 +641,10 @@ def _build_character_video(
             closed_label,
             x_expr,
             y_expr,
-            display_intervals[speaker],
+            subtract_ranges(
+                subtract_ranges(display_intervals[speaker], emotion_active_ranges),
+                mouth_open_ranges,
+            ),
             f"bg{stage}c",
         )
         current_label = append_overlay_stage(
@@ -634,7 +653,7 @@ def _build_character_video(
             open_label,
             x_expr,
             y_expr,
-            talk_intervals.get(speaker, []),
+            mouth_open_ranges,
             f"bg{stage}o",
         )
 
@@ -659,9 +678,11 @@ def _build_character_video(
             filter_stages.append(f"[{closed_e_idx}:v]scale=-2:{CHARACTER_SHORTS_HEIGHT}[{closed_e_label}]")
             filter_stages.append(f"[{open_e_idx}:v]scale=-2:{CHARACTER_SHORTS_HEIGHT}[{open_e_label}]")
 
+            # emotion側もclosed/open(別々の立ち絵素材)を排他的な区間にする
+            # (video_assembler.subtract_rangesのdocstring参照)。
             current_label = append_overlay_stage(
                 filter_stages, current_label, closed_e_label, x_expr, y_expr,
-                intervals["closed"], f"bg{stage}e{emotion}c",
+                subtract_ranges(intervals["closed"], intervals["open"]), f"bg{stage}e{emotion}c",
             )
             current_label = append_overlay_stage(
                 filter_stages, current_label, open_e_label, x_expr, y_expr,

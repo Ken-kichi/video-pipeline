@@ -200,6 +200,58 @@ def build_enable_expr(intervals: list[tuple[float, float]]) -> str:
 MAX_ENABLE_EXPR_TERMS = 90
 
 
+def build_exclude_enable_expr(exclude: list[tuple[float, float]]) -> str:
+    """exclude区間のいずれにも該当しない時間帯を表すenable式を返す。
+
+    表情差分の立ち絵やopen(口を開けた)立ち絵を重ねている間は、その下の
+    ベースレイヤー(通常表情のclosed立ち絵)をこの式で非表示にする(でないと
+    同じ位置に2枚の立ち絵が同時に描画され、シルエットの僅かなズレ(手や
+    髪の位置が数px違う等)から二重に見えてしまう不具合になる。
+    姉妹プロジェクト(code-video-toolkit-app)の実機で確認済みの不具合と
+    同じ原因のため、同じ対処を移植している)。build_enable_exprと同じ
+    理由でチャンク分割し、各チャンクをnot()で否定してから掛け合わせる
+    (0/1値の掛け算は論理積として働く)。
+    """
+    if not exclude:
+        return "1"
+    chunks = [
+        exclude[i : i + MAX_ENABLE_EXPR_TERMS]
+        for i in range(0, len(exclude), MAX_ENABLE_EXPR_TERMS)
+    ]
+    return "*".join(f"not({build_enable_expr(chunk)})" for chunk in chunks)
+
+
+def subtract_ranges(
+    intervals: list[tuple[float, float]], exclude: list[tuple[float, float]]
+) -> list[tuple[float, float]]:
+    """intervalsの各区間から、excludeと重なる部分を取り除く。
+
+    closed(口を閉じた/通常表情の)立ち絵とopen(口を開けた/表情差分の)
+    立ち絵は別々に生成された素材でシルエットが厳密には一致しないため、
+    「常時表示+上から重ねる」実装のままだと、上のレイヤーが下のレイヤーの
+    シルエットを完全に覆いきれない部分(はみ出た手や髪)が同時に描画され
+    続けて二重に見えてしまう。表示区間を互いに排他的にすることで、
+    シルエットが多少ずれていても同時に2枚が描画されることが無くなる。
+    """
+    if not exclude:
+        return list(intervals)
+    sorted_exclude = sorted(exclude)
+    result: list[tuple[float, float]] = []
+    for start, end in intervals:
+        cursor = start
+        for ex_start, ex_end in sorted_exclude:
+            if ex_end <= cursor or ex_start >= end:
+                continue
+            if ex_start > cursor:
+                result.append((cursor, min(ex_start, end)))
+            cursor = max(cursor, ex_end)
+            if cursor >= end:
+                break
+        if cursor < end:
+            result.append((cursor, end))
+    return result
+
+
 def append_overlay_stage(
     filter_stages: list[str],
     current_label: str,
@@ -964,6 +1016,19 @@ def assemble_video(
             # 開けっぱなしにフォールバックする(口パク無しよりはこちらの方が自然)
             for interval in (item.mouth_open_intervals or [(item.start, item.end)])
         ]
+        emotion_groups = _group_non_neutral_emotion_intervals(timeline, speaker)
+        # 表情差分の立ち絵が表示される区間は、通常表情のベースレイヤーを
+        # 非表示にする(でないと同じ位置に2枚の立ち絵が同時に描画されて
+        # 二重に見えてしまう)。
+        emotion_active_ranges = [
+            interval
+            for intervals_ in emotion_groups.values()
+            for interval in intervals_["closed"]
+        ]
+        # closed/openは別々の立ち絵素材でシルエットが厳密には一致しないため、
+        # closedの表示区間からはopenの区間も差し引いて排他的にする(詳細は
+        # subtract_rangesのdocstring参照)。
+        mouth_open_ranges = subtract_ranges(intervals, emotion_active_ranges)
 
         ffmpeg_inputs += ["-i", str(assets["closed"])]
         closed_idx = input_index
@@ -982,13 +1047,17 @@ def assemble_video(
         )
 
         bg_closed_label = f"bg{input_index}c"
-        # まず口を閉じた状態を常時オーバーレイ(=待機中のデフォルト表示)、
+        # まず口を閉じた状態を常時オーバーレイ(=待機中のデフォルト表示。ただし
+        # 表情差分の立ち絵が表示される区間・口を開いている区間は除く)し、
         # その上に口を開いた状態を、そのキャラクターが喋っている区間だけ重ねる。
-        # 区間数が多い(セリフの多い長尺動画)場合、1つのenable式に収まらず
+        # closed/openを必ず排他的な区間にする理由はsubtract_rangesのdocstring
+        # 参照。区間数が多い(セリフの多い長尺動画)場合、1つのenable式に収まらず
         # ffmpegの式パーサが失敗するため、append_overlay_stageで
         # MAX_ENABLE_EXPR_TERMSごとにoverlay段を分割する
         filter_stages.append(
-            f"[{current_label}][{closed_scaled_label}]overlay=x={x_expr}:y={y_expr}[{bg_closed_label}]"
+            f"[{current_label}][{closed_scaled_label}]overlay=x={x_expr}:y={y_expr}:"
+            f"enable='{build_exclude_enable_expr(emotion_active_ranges + mouth_open_ranges)}'"
+            f"[{bg_closed_label}]"
         )
         current_label = append_overlay_stage(
             filter_stages,
@@ -996,7 +1065,7 @@ def assemble_video(
             open_scaled_label,
             x_expr,
             y_expr,
-            intervals,
+            mouth_open_ranges,
             f"bg{input_index}o",
         )
 
@@ -1004,9 +1073,7 @@ def assemble_video(
         # 通常表情の上から重ねる。closed→openの順に重ねることで、同じ
         # 感情内でも口パクが再現される(通常表情と同じ仕組み)。
         prefix = CHARACTER_PREFIXES.get(speaker, speaker)
-        for emotion, emotion_intervals in _group_non_neutral_emotion_intervals(
-            timeline, speaker
-        ).items():
+        for emotion, emotion_intervals in emotion_groups.items():
             closed_e_path = character_emotion_assets.get_emotion_asset_path(
                 prefix, emotion, "closed"
             )
@@ -1032,13 +1099,15 @@ def assemble_video(
                 f"[{open_e_idx}:v]scale=-2:{CHARACTER_VIDEO_HEIGHT}[{open_e_label}]"
             )
 
+            # emotion側もclosed/open(別々の立ち絵素材)を排他的な区間にする
+            # (subtract_rangesのdocstring参照)。
             current_label = append_overlay_stage(
                 filter_stages,
                 current_label,
                 closed_e_label,
                 x_expr,
                 y_expr,
-                emotion_intervals["closed"],
+                subtract_ranges(emotion_intervals["closed"], emotion_intervals["open"]),
                 f"bg{input_index}ec",
             )
             current_label = append_overlay_stage(
