@@ -40,7 +40,13 @@ CHARACTER_ASSETS_DIR = Path(__file__).parent / "assets" / "characters"
 
 SLIDE_WIDTH = 1920
 SLIDE_HEIGHT = 1080
-MARGIN = 100
+# video_assembler.pyのKen Burnsズーム(SLIDE_ZOOM_MAX_SCALE=1.15)は画面中心基準で
+# ズームするため、最大ズーム時は上下左右それぞれ約6.5%
+# ((1 - 1/1.15) / 2)が画面外に切れる(1920pxで約125px、1080pxで約70px)。
+# MARGIN・EDGE_SAFE_MARGIN_Vはこのクロップ量より広く取り、タイトルなど
+# スライド端に近い内容がズーム中に見切れないようにする(実際に発生した不具合)。
+MARGIN = 140
+EDGE_SAFE_MARGIN_V = 100
 # code/diagram/table/imageスライドの画像が、画面下部の字幕・キャラクター立ち絵
 # オーバーレイと重ならないよう確保する下部の余白(px)。
 # - 字幕側の余白: 字幕は常に表示されるので無条件に確保する。行数は
@@ -218,7 +224,7 @@ def _draw_footer(draw: ImageDraw.ImageDraw, slide_number: int) -> None:
     footer_text = f"{slide_number}"
     footer_width = draw.textlength(footer_text, font=footer_font)
     draw.text(
-        (SLIDE_WIDTH - MARGIN - footer_width, SLIDE_HEIGHT - 60),
+        (SLIDE_WIDTH - MARGIN - footer_width, SLIDE_HEIGHT - EDGE_SAFE_MARGIN_V),
         footer_text,
         font=footer_font,
         fill=SUBTITLE_COLOR,
@@ -274,7 +280,7 @@ def _render_bullets(
     title_lines = _wrap_text(
         draw, slide_data.get("title", ""), title_font, body_max_width
     )
-    y = 90
+    y = EDGE_SAFE_MARGIN_V
     y = _draw_lines(draw, title_lines, title_font, MARGIN, y, TITLE_COLOR)
 
     y += 20
@@ -345,7 +351,9 @@ def _render_quote(
 
     # 装飾用の大きな引用符
     mark_font = _load_font(220, weight=700)
-    draw.text((MARGIN - 20, 60), "\u201c", font=mark_font, fill=ACCENT_COLOR_SOFT)
+    draw.text(
+        (MARGIN - 20, EDGE_SAFE_MARGIN_V), "\u201c", font=mark_font, fill=ACCENT_COLOR_SOFT
+    )
 
     quote_font = _load_font(88, weight=700)
     quote_lines = _wrap_text(draw, quote_text, quote_font, SLIDE_WIDTH - MARGIN * 2)
@@ -385,7 +393,7 @@ def _render_comparison(
     title_lines = _wrap_text(
         draw, slide_data.get("title", ""), title_font, SLIDE_WIDTH - MARGIN * 2
     )
-    y_title = 90
+    y_title = EDGE_SAFE_MARGIN_V
     y_after_title = _draw_lines(
         draw, title_lines, title_font, MARGIN, y_title, TITLE_COLOR
     )
@@ -444,7 +452,7 @@ def _render_media_layout(
     title_lines = _wrap_text(
         draw, slide_data.get("title", ""), title_font, SLIDE_WIDTH - MARGIN * 2
     )
-    y = 70
+    y = EDGE_SAFE_MARGIN_V
     y = _draw_lines(draw, title_lines, title_font, MARGIN, y, TITLE_COLOR)
     y += 20
     draw.line([(MARGIN, y), (SLIDE_WIDTH - MARGIN, y)], fill=ACCENT_COLOR, width=4)
