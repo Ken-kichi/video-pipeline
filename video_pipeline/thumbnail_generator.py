@@ -159,6 +159,13 @@ def _character_reference_instruction(speakers: list[str], visual_summary: str = 
     なのはキャラクターとしての同一性(髪型・髪色・服装・配色・線画タッチ)
     だけであり、ポーズ・表情・向きは動画の内容に合わせて毎回自由に描き
     直してよい(むしろ描き直すべき)ことを明示する指示に変更した。
+
+    その後、例示のポーズ一覧が「驚き・焦り系」3つに対して「ポジティブ系」が
+    「triumphant fist pump」1つしか無く、しかも先頭に「両手を頬に添えた
+    驚き顔」を置いていたため、内容が効率化・成功のようなポジティブな
+    話題でも毎回同じ驚き顔が出てしまう偏りが実際に確認された。そこで、
+    まず内容がポジティブ/ネガティブ/中立のどれかを判断させた上で、
+    各トーンごとに複数のポーズ候補を均等に提示する指示に変更した。
     """
     names = " and ".join(CHARACTER_EN_NAMES.get(s, s) for s in speakers)
     instruction = (
@@ -173,9 +180,19 @@ def _character_reference_instruction(speakers: list[str], visual_summary: str = 
     if visual_summary:
         instruction += f" ({visual_summary})"
     instruction += (
-        ", for example: wide-eyed shock with both hands on their cheeks, "
-        "urgently pointing at something, recoiling with cold sweat, or a "
-        "triumphant fist pump — whichever emotion actually fits the content. "
+        ". First judge whether this content's emotional tone is positive "
+        "(a success, a benefit, an improvement, something achieved or made "
+        "easier), negative (a problem, risk, failure, or warning), or "
+        "surprising/neutral (a notable fact or finding, neither clearly good "
+        "nor bad), then pick a pose that matches that tone — do not default "
+        "to a shocked or scared expression for positive content. "
+        "If positive: a bright triumphant fist pump, a confident thumbs-up "
+        "with a big smile, or an excited double peace-sign pose. "
+        "If negative: recoiling with cold sweat, a worried/troubled "
+        "expression with a hand on the chin, or urgently pointing at "
+        "something with an alarmed look. "
+        "If surprising/neutral: wide-eyed shock with both hands on their "
+        "cheeks, or an intrigued tilted-head look with a finger raised. "
         "Do not depict a different character or a human face. Position them "
         "so they do not overlap or cover the headline text."
     )
