@@ -15,9 +15,10 @@ from video_pipeline.config import MAX_TOKENS
 _client: Anthropic | None = None
 
 # 出力がmax_tokensで打ち切られた場合、この上限まで倍々に増やして再生成する。
-# 非ストリーミングAPIはmax_tokensが21333を超えるとSDKがValueErrorを出すため、
-# それより余裕を持たせた値にする(21333を超えたい場合はstream=Trueへの変更が必要)。
-MAX_TOKENS_CEILING = 20000
+# ストリーミングAPI(messages.stream)を使っているため、非ストリーミングAPIの
+# 21333というmax_tokensの上限は適用されない。claude-sonnet-5は最大128,000
+# トークンまで出力できるため、そこに余裕を持たせた値を上限にする。
+MAX_TOKENS_CEILING = 64000
 
 
 def get_client() -> Anthropic:
@@ -44,12 +45,13 @@ def _generate_with_truncation_retry(
     current_max_tokens = max_tokens
     last_text = ""
     for attempt in range(max_attempts):
-        response = get_client().messages.create(
+        with get_client().messages.stream(
             model=model,
             max_tokens=current_max_tokens,
             system=system,
             messages=[{"role": "user", "content": user}],
-        )
+        ) as stream:
+            response = stream.get_final_message()
         text = "".join(block.text for block in response.content if block.type == "text")
         last_text = text
         if response.stop_reason != "max_tokens":
