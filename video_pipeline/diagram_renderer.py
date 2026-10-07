@@ -27,7 +27,10 @@ def render_mermaid_diagram(mermaid_source: str, output_path: str, timeout: int =
         encoded = base64.urlsafe_b64encode(mermaid_source.encode("utf-8")).decode(
             "ascii"
         )
-        url = f"{MERMAID_INK_BASE_URL}/{encoded}?bgColor=white"
+        # scale=3(mermaid.inkが対応する最大値)を指定し高解像度で取得する。
+        # 既定のままだと図が低解像度で返り、スライド側で拡大すると粗くなる
+        # (_fit_imageは枠に収まる最大倍率まで拡大もするようになったため)。
+        url = f"{MERMAID_INK_BASE_URL}/{encoded}?bgColor=white&scale=3"
         response = requests.get(url, timeout=timeout)
         response.raise_for_status()
 

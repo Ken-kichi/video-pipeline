@@ -175,7 +175,13 @@ def _block_height(lines: list[str], font: ImageFont.FreeTypeFont) -> int:
 
 
 def _fit_image(image_path: str, max_width: int, max_height: int) -> Image.Image:
-    """アスペクト比を保ったまま指定サイズ内に収まるようリサイズする。
+    """アスペクト比を保ったまま指定サイズに収まる最大の大きさへリサイズする。
+
+    Image.thumbnail()は縮小しかしない(元画像が指定サイズより小さい場合は
+    そのまま)ため、mermaid.inkのような外部サービスが返す低解像度の画像が
+    スライドの広い余白の中にそのまま小さく表示されてしまう不具合があった。
+    ここでは縮小・拡大どちらの方向でも、指定した枠に収まる最大の倍率まで
+    リサイズし、スライドのスペースを無駄にしないようにする。
 
     透過PNG(RGBA、記事からダウンロードしたロゴ・アイコン等でよくある)は
     アルファチャンネルを保ったまま返す(呼び出し側の_render_media_layoutが
@@ -187,8 +193,9 @@ def _fit_image(image_path: str, max_width: int, max_height: int) -> Image.Image:
     img = Image.open(image_path)
     if img.mode != "RGBA":
         img = img.convert("RGB")
-    img.thumbnail((max_width, max_height), Image.LANCZOS)
-    return img
+    scale = min(max_width / img.width, max_height / img.height)
+    new_size = (max(1, round(img.width * scale)), max(1, round(img.height * scale)))
+    return img.resize(new_size, Image.LANCZOS)
 
 
 def _cover_resize(img: Image.Image, target_w: int, target_h: int) -> Image.Image:
