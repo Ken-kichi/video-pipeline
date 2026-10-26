@@ -51,7 +51,7 @@ YouTubeにアップロードし、`description.txt`の内容を概要欄に貼�
 
 ```mermaid
 flowchart TD
-    Article["Markdown記事"] --> VP["<b>uv run video-pipeline</b><br/>台本→スライド→VOICEVOXテキスト→<br/>整合性チェック→概要欄"]
+    Article["Markdown記事"] --> VP["<b>uv run video-pipeline</b><br/>台本→スライド→<br/>整合性チェック→VOICEVOXテキスト→概要欄"]
     VP --> Out[("output/&lt;実行時刻&gt;/<br/>script.md, slides/, voicevox_script.txt,<br/>description.txt")]
 
     Out --> GT["<b>uv run generate-thumbnail</b><br/>script.mdだけを読んでサムネイル生成"]
@@ -97,13 +97,11 @@ flowchart TD
     Article["記事"] --> Script["台本エージェント<br/>(生成→評価→修正、最大3回)"]
     Article --> Slides
     Script --> Slides["スライドエージェント<br/>(生成→評価→修正)"]
-    Script --> Voicevox["VOICEVOXテキストエージェント<br/>(生成→評価→修正)"]
     Script --> Integration
-    Slides --> Integration["総合エージェント<br/>3つの整合性を採点(GEMINI_API_KEYがあればGeminiとクロスチェック)"]
-    Voicevox --> Integration
+    Slides --> Integration["総合エージェント<br/>台本とスライドの整合性を採点(GEMINI_API_KEYがあればGeminiとクロスチェック)"]
     Integration -->|スコア未達 or issuesあり: 該当箇所を修正| Script
     Integration -->|スコア未達 or issuesあり: 該当箇所を修正| Slides
-    Integration -->|スコア未達 or issuesあり: 該当箇所を修正| Voicevox
+    Integration -->|スコア達成 かつ issuesなし| Vtext["VOICEVOXテキスト<br/>(台本から決定的に抽出、LLM不使用)"]
     Integration -->|スコア達成 かつ issuesなし| Title["タイトルエージェント<br/>(--title未指定時のみ、単発生成)"]
     Title --> Description["概要欄エージェント<br/>(生成→評価→修正)"]
 ```
@@ -130,7 +128,7 @@ flowchart TD
 成果物に残ってしまっていた**）。
 
 ただしissuesを1件でも継続条件にすると、些末な・誤検知気味の指摘のためだけに
-毎回`MAX_REVISION_LOOPS`回ループしてしまうケースがあった。これを緩和するため、
+毎回`MAX_INTEGRATION_LOOPS`回ループしてしまうケースがあった。これを緩和するため、
 `GEMINI_API_KEY`が設定されていれば、Claudeに加えてGeminiにも同じ観点
 (`integration_agent.CHECK_SYSTEM`)で独立にチェックさせ、**両方のAIが一致して
 指摘した問題だけ**をissues（＝修正ループのトリガー）として扱う。片方のAIしか
@@ -248,7 +246,7 @@ uv run render-video
 流れ:
 1. `script_parser.py`が`script.md`を正規表現で決定的にパースし、
    「どのセリフがどのシーンに属するか」を確定させる
-   （`voicevox_agent`のLLM抽出は経由しない。台本と音声・字幕を確実に一致させるため）
+   （`voicevox_script.txt`は経由しない。台本と音声・字幕を確実に一致させるため）
 2. 各セリフをVOICEVOX ENGINEで直接音声合成し、長さを計測。セリフ間には
    自然な会話に見えるよう0.4秒の無音の"間"を挿入する
    (`video_assembler.PAUSE_BETWEEN_LINES_SECONDS`で調整可能)。話者+セリフ内容の
@@ -524,8 +522,7 @@ video_pipeline/
 └── agents/
     ├── script_agent.py        # 台本の生成・評価・修正
     ├── slides_agent.py        # スライド内容(background_prompt, scene_number含む)の生成・評価・修正
-    ├── voicevox_agent.py      # VOICEVOX用テキストの生成・評価・修正
-    ├── integration_agent.py   # 3つの横断的な整合性チェック
+    ├── integration_agent.py   # 台本とスライドの横断的な整合性チェック
     └── description_agent.py   # YouTube概要欄（概要文・目次・使用技術・リンク・タグ）の生成・評価・修正
                                 # +VOICEVOX/立ち絵クレジット欄を決定的に付け足す
     ├── title_agent.py          # YouTubeタイトルの生成(単発呼び出し、--title未指定時のみ)
@@ -544,10 +541,12 @@ video_pipeline/
 - `MODEL_GENERATE`（環境変数 `CLAUDE_MODEL_GENERATE`）: 台本・スライドの生成/修正。デフォルト `claude-sonnet-5`
 - `MODEL_EVALUATE`（環境変数 `CLAUDE_MODEL_EVALUATE`）: 評価・整合性チェック。デフォルト `claude-sonnet-5`
   （品質を優先するなら `claude-opus-4-8` に変更。コストは約2.5倍になる）
-- `MODEL_EXTRACT`（環境変数 `CLAUDE_MODEL_EXTRACT`）: VOICEVOXテキストの機械的な抽出。デフォルト `claude-haiku-4-5-20251001`
+- `MODEL_EXTRACT`（環境変数 `CLAUDE_MODEL_EXTRACT`）: 総合チェックの2AI結果の統合・概要欄の評価など機械的な作業。デフォルト `claude-haiku-4-5-20251001`
 - `MODEL_EVALUATE_GEMINI`（環境変数 `GEMINI_MODEL_EVALUATE`）: 総合エージェントのクロスチェックに使うGeminiモデル。
   デフォルト `gemini-3.1-pro-preview`（`GEMINI_API_KEY`が未設定の場合はそもそも使われない）
-- `MAX_REVISION_LOOPS`: 各エージェント（総合エージェントを含む）の生成→評価→修正ループの最大回数（デフォルト3。
+- `MAX_INTEGRATION_LOOPS`（環境変数でも指定可）: 総合エージェントのチェック→修正ラウンドの最大回数（デフォルト2。
+  1だとチェックのみで修正されない）
+- `MAX_REVISION_LOOPS`: 台本・スライド・概要欄の生成→評価→修正ループの最大回数（デフォルト3。
   減らすとコストも下がるが、品質基準に届く前にループが打ち切られやすくなる）
 - `SCORE_THRESHOLD`: この点数(0-100)以上で合格とみなす。総合エージェントの整合性スコアにも適用される（デフォルト80。
   ただし総合エージェントはスコアがこの値以上でも`issues`が残っている間は修正ループを継続する）
@@ -972,13 +971,14 @@ ffmpeg -filters | grep ass   # ass / subtitles が表示されればOK
   計8種類。配色やフォントサイズを変えたい場合は`slide_image_builder.py`の定数を編集する
 - 概要欄エージェントは総合エージェントの整合性チェック対象には含めていない
   （確定した台本だけを見て作るため、台本と概要欄の食い違いはチェックされるが、
-  スライド・VOICEVOXテキストとの整合性チェックは対象外）
+  スライドとの整合性チェックは対象外）
 - スライド背景(background_prompt)の妥当性は`slides_agent`の評価観点に軽く含めている
   程度で、総合エージェントの整合性チェック対象には含めていない
-- `voicevox_agent`のプロンプトでは`"[話者名] セリフ"`(角括弧あり)の形式を
-  指示しているが、実際には軽量モデル(MODEL_EXTRACT)が角括弧なしの
-  `"話者名 セリフ"`形式で出力することがあった。`voicevox_client.py`の
-  パーサーは既知の話者名（つむぎ/ずんだもん）をもとに両方の形式に対応している
+- `voicevox_script.txt`は以前LLMエージェントで抽出していたが、セリフの機械的な
+  コピーに過ぎずコストに見合わないため、`script_parser.build_voicevox_text()`による
+  決定的な生成に置き換えた（`"[話者名] セリフ"`形式）。過去の出力には角括弧なしの
+  `"話者名 セリフ"`形式のものもあるため、`voicevox_client.py`のパーサーは
+  既知の話者名（つむぎ/ずんだもん）をもとに両方の形式に対応している
 - DaVinci Resolveでの編集・書き出しは対象外
   （ResolveのPython/Luaスクリプティングでタイムライン組み立てまで拡張する余地がある）
 - `render-video`はscript.mdの見出し形式「### シーン<N>：〜」とセリフ形式

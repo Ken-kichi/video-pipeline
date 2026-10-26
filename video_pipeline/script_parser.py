@@ -1,8 +1,8 @@
 """台本(script.md)を構造化データに決定的にパースする。
 
 動画組み立て(音声合成・字幕・スライド表示のタイミング)には「どのセリフが
-どのシーンに属するか」を確実に知る必要がある。voicevox_agentのようにLLMで
-再抽出する方式は柔軟だが、抽出内容が微妙にブレるリスクがある。
+どのシーンに属するか」を確実に知る必要がある。LLMで再抽出する方式は柔軟だが、
+抽出内容が微妙にブレるリスクがあり、LLMコストもかかる。
 script.mdのフォーマットはscript_agentのプロンプトでこちらが完全に
 コントロールしているため、ここは正規表現によるパースで確実性を優先する。
 
@@ -109,3 +109,15 @@ def flatten_lines(scenes: list[Scene]) -> list[ScriptLine]:
     for scene in scenes:
         lines.extend(scene.lines)
     return lines
+
+
+def build_voicevox_text(script_text: str) -> str:
+    """台本から"[話者名] セリフ"形式の読み上げ用テキスト(voicevox_script.txt)を作る。
+
+    DaVinci Resolveで手動編集する場合の`voicevox-synthesize`用。以前はLLMエージェント
+    (生成→評価→修正)で抽出していたが、やっていることはセリフの機械的な抽出だけで、
+    LLMだと一字一句コピーするはずの本文がブレるリスクもあるため、parse_script()による
+    決定的な処理に置き換えた。感情タグ(喜び等)は読み上げに不要なので含めない。
+    """
+    lines = flatten_lines(parse_script(script_text))
+    return "\n".join(f"[{line.speaker}] {line.text}" for line in lines)

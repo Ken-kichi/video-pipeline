@@ -26,6 +26,13 @@ MODEL_EVALUATE_GEMINI = os.environ.get(
 # 生成→評価→修正ループの最大試行回数（ai-dev-agent構想と同じく上限3回）
 MAX_REVISION_LOOPS = 3
 
+# 総合エージェント(台本とスライドの横断チェック)の最大ラウンド数。
+# 1ラウンドで「Claudeのチェック+Geminiのチェック+結果の統合」と複数回の呼び出しが
+# 発生し、指摘があれば台本・スライドの修正までする。台本・スライドは既に個別の
+# 評価ループを通っているため、MAX_REVISION_LOOPS(3)よりも少なくしてコストを抑える。
+# 1にすると「チェックして報告するだけ」で修正は行われないため、最小値は2
+MAX_INTEGRATION_LOOPS = int(os.environ.get("MAX_INTEGRATION_LOOPS", "2"))
+
 # このスコア(0-100)以上になったらループを打ち切って採用する
 SCORE_THRESHOLD = 80
 

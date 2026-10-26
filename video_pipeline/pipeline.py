@@ -4,10 +4,10 @@
   1. 台本エージェント: 記事 -> 台本（生成→評価→修正ループ）
   2. スライドエージェント: 記事+台本 -> スライド内容（生成→評価→修正ループ）
      ※各スライドには任意でbackground_prompt（背景用、文字・数値は描かせない）が付く
-  3. VOICEVOXテキストエージェント: 台本 -> 読み上げ用テキスト（生成→評価→修正ループ）
-  4. 総合エージェント: 3つの整合性を採点し、スコアがSCORE_THRESHOLD未満か
+  3. VOICEVOXテキスト: 台本から決定的に抽出する（LLMは使わない）
+  4. 総合エージェント: 台本とスライドの整合性を採点し、スコアがSCORE_THRESHOLD未満か
      issuesが1件でも残っていれば該当箇所を修正して再採点する
-     （MAX_REVISION_LOOPSに達したら最高スコア案を採用）。GEMINI_API_KEYが
+     （MAX_INTEGRATION_LOOPSに達したら最高スコア案を採用）。GEMINI_API_KEYが
      設定されている場合、Claudeに加えてGeminiにも同じ観点で独立にチェック
      させ、両方のAIが一致して指摘した問題だけをissuesとして扱う（片方のみの
      指摘は参考表示に留め、修正ループのトリガーにしない。単一モデルの
@@ -35,13 +35,12 @@ from video_pipeline.agents import (
     script_agent,
     slides_agent,
     title_agent,
-    voicevox_agent,
 )
 from video_pipeline.article_assets import extract_article_assets, summarize_for_prompt
 from video_pipeline.code_renderer import render_code_image
 from video_pipeline.config import (
     GENERATE_SLIDE_IMAGES,
-    MAX_REVISION_LOOPS,
+    MAX_INTEGRATION_LOOPS,
     MENTION_ARTICLE,
     SCORE_THRESHOLD,
 )
@@ -49,6 +48,7 @@ from video_pipeline.diagram_renderer import render_mermaid_diagram
 from video_pipeline.image_downloader import download_image
 from video_pipeline.image_generator import generate_slide_background
 from video_pipeline.io_utils import extract_h1_title, read_markdown, write_text_file
+from video_pipeline.script_parser import build_voicevox_text
 from video_pipeline.slide_image_builder import build_slide_images
 from video_pipeline.table_renderer import render_table_image
 
@@ -60,22 +60,21 @@ def _run_integration_loop(
     article_text: str,
     script: str,
     slides: list[dict],
-    voicevox_text: str,
     asset_summary: str = "",
-) -> tuple[str, list[dict], str, int, list[dict]]:
+) -> tuple[str, list[dict], int, list[dict]]:
     """総合エージェントによる整合性チェック→(必要なら)修正ループ。
 
     generate/evaluate/reviseが同一の1つの成果物に閉じているloop.pyの
-    run_with_evaluation_loopとは違い、ここでは「3つの成果物のうち
+    run_with_evaluation_loopとは違い、ここでは「2つの成果物のうち
     フィードバックがついたものだけをそれぞれの担当エージェントに直させる」
     という分岐が必要なため、専用のループとして実装している。
     """
     history: list[dict] = []
-    best = (script, slides, voicevox_text)
+    best = (script, slides)
     best_score = -1
 
-    for attempt in range(1, MAX_REVISION_LOOPS + 1):
-        result = integration_agent.check(script, slides, voicevox_text)
+    for attempt in range(1, MAX_INTEGRATION_LOOPS + 1):
+        result = integration_agent.check(script, slides)
         score = int(result.get("score", 0))
         issues = result.get("issues", [])
         history.append({"attempt": attempt, "score": score, "issues": issues})
@@ -88,20 +87,19 @@ def _run_integration_loop(
 
         if score > best_score:
             best_score = score
-            best = (script, slides, voicevox_text)
+            best = (script, slides)
 
         if score >= SCORE_THRESHOLD and not issues:
             break
-        if attempt == MAX_REVISION_LOOPS:
+        if attempt == MAX_INTEGRATION_LOOPS:
             print(
                 f"  [{integration_agent.LABEL}] "
-                f"ループ上限({MAX_REVISION_LOOPS}回)に到達。最高スコア案を採用します。"
+                f"ループ上限({MAX_INTEGRATION_LOOPS}回)に到達。最高スコア案を採用します。"
             )
             break
 
         script_feedback = result.get("script_feedback", "")
         slides_feedback = result.get("slides_feedback", "")
-        voicevox_feedback = result.get("voicevox_feedback", "")
 
         if script_feedback:
             print("  台本を修正中...")
@@ -111,14 +109,9 @@ def _run_integration_loop(
             slides = slides_agent.revise(
                 script, slides, slides_feedback, asset_summary
             )
-        if voicevox_feedback:
-            print("  VOICEVOXテキストを修正中...")
-            voicevox_text = voicevox_agent.revise(
-                script, voicevox_text, voicevox_feedback
-            )
 
-    script, slides, voicevox_text = best
-    return script, slides, voicevox_text, best_score, history
+    script, slides = best
+    return script, slides, best_score, history
 
 
 def _generate_slide_backgrounds(
@@ -291,15 +284,12 @@ def run_pipeline(
     print("=== スライドエージェント ===")
     slides, slides_score, _ = slides_agent.run(article_text, script, asset_summary)
 
-    print("=== VOICEVOXテキストエージェント ===")
-    voicevox_text, voicevox_score, _ = voicevox_agent.run(script)
-
     print("=== 総合エージェント（整合性チェック） ===")
-    script, slides, voicevox_text, integration_score, integration_history = (
-        _run_integration_loop(
-            article_text, script, slides, voicevox_text, asset_summary
-        )
+    script, slides, integration_score, integration_history = _run_integration_loop(
+        article_text, script, slides, asset_summary
     )
+    # 総合チェックで台本が修正された場合も反映されるよう、チェック後に作る
+    voicevox_text = build_voicevox_text(script)
 
     if video_title is None:
         print("=== タイトルエージェント ===")
@@ -351,7 +341,6 @@ def run_pipeline(
     print(
         f"台本スコア: {script_score}点 / "
         f"スライドスコア: {slides_score}点 / "
-        f"VOICEVOXテキストスコア: {voicevox_score}点 / "
         f"整合性スコア: {integration_score}点 / "
         f"概要欄スコア: {description_score}点"
     )
@@ -370,7 +359,6 @@ def run_pipeline(
         "scores": {
             "script": script_score,
             "slides": slides_score,
-            "voicevox": voicevox_score,
             "integration": integration_score,
             "description": description_score,
         },

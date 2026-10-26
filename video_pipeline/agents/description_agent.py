@@ -20,7 +20,7 @@
 from video_pipeline.claude_client import call_text, call_json
 from video_pipeline.config import (
     CHANNEL_URL,
-    MODEL_EVALUATE,
+    MODEL_EXTRACT,
     MODEL_GENERATE,
     TSUMUGI_ILLUSTRATOR_CREDIT,
     ZUNDAMON_ILLUSTRATOR_CREDIT,
@@ -157,7 +157,8 @@ def evaluate(script: str, description: str, include_article_link: bool = True) -
         f"# 動画台本\n\n{script}\n\n# 現在の概要欄テキスト\n\n{description}\n\n"
         "上記を評価してください。"
     )
-    return call_json(system, user, model=MODEL_EVALUATE)
+    # 評価観点は目次の形式・時刻の一致など定型的なチェックが中心なので軽量モデルで足りる
+    return call_json(system, user, model=MODEL_EXTRACT)
 
 
 def revise(

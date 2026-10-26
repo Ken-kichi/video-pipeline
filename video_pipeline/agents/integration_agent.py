@@ -1,8 +1,9 @@
-"""台本・スライド内容・VOICEVOX用テキストの3つを横断でチェックする総合エージェント。
+"""台本とスライド内容の2つを横断でチェックする総合エージェント。
 
 各エージェントは自分の担当物しか見ていないため、
-「台本にはあるのにスライドに反映されていない」「VOICEVOXテキストの話者順が
-スライドの展開とズレている」といった横断的な不整合はここで検出する。
+「台本にはあるのにスライドに反映されていない」「スライドの展開順が
+台本のシーン展開とズレている」といった横断的な不整合はここで検出する。
+(VOICEVOX用テキストは台本から決定的に作るため、チェック対象に含めない)
 
 Claude単独でのチェックだと、そのAI自身が見落としがちな不整合(表現の癖・
 学習データの偏りに起因するもの)を拾えない懸念があるため、GEMINI_API_KEYが
@@ -21,43 +22,36 @@ import os
 
 from video_pipeline import gemini_client
 from video_pipeline.claude_client import call_json
-from video_pipeline.config import MODEL_EVALUATE, MODEL_EVALUATE_GEMINI
+from video_pipeline.config import MODEL_EVALUATE, MODEL_EVALUATE_GEMINI, MODEL_EXTRACT
 
 LABEL = "総合エージェント"
 
 CHECK_SYSTEM = """あなたは動画制作パイプラインの最終チェック担当です。
-台本・スライド内容・VOICEVOX用読み上げテキストの3つを横断的に確認し、
+台本とスライド内容の2つを横断的に確認し、
 整合性を採点してください。
 
 チェック観点:
 - スライドの展開順が台本のシーン展開と一致しているか
-- VOICEVOX用テキストのセリフが、一人称・語尾・言い回しを含め台本と
-  一言一句完全に一致しているか（要約・言い換え・表記の書き換えがないか）。
-  特につむぎ「あーし」⇔ずんだもん「ボク」のような一人称の入れ替わりは
-  致命的な不整合として重点的に確認する
 - 台本にある重要な内容（数値・図の説明など）がスライドから漏れていないか
-- 3つのファイルを合わせて見たときに矛盾する記述がないか
+- 2つを合わせて見たときに矛盾する記述がないか
 
 採点基準:
 - 100点: 完全に整合が取れている
 - 70〜99点: 軽微な表現のズレ程度（許容範囲内〜軽度の指摘）
 - 40〜69点: シーンの一部抜け落ちなど、視聴者が違和感を持ちうる問題がある
-- 0〜39点: シーンが丸ごと欠落している、話者が入れ替わっている、
-  VOICEVOX用テキストで話者の一人称が入れ替わっているなど致命的な
-  不整合がある
+- 0〜39点: シーンが丸ごと欠落しているなど致命的な不整合がある
 
 JSON形式のみを返してください:
 {
   "score": <int 0-100>,
   "issues": ["<検出した問題点1>", "<問題点2>", ...],
   "script_feedback": "<台本側で直すべき点。無ければ空文字>",
-  "slides_feedback": "<スライド側で直すべき点。無ければ空文字>",
-  "voicevox_feedback": "<VOICEVOXテキスト側で直すべき点。無ければ空文字>"
+  "slides_feedback": "<スライド側で直すべき点。無ければ空文字>"
 }
 """
 
 MERGE_SYSTEM = """あなたは、2つのAI(Claude・Gemini)が独立に行った台本・
-スライド内容・VOICEVOX用テキストの整合性チェック結果を統合する担当です。
+スライド内容の整合性チェック結果を統合する担当です。
 
 2つのAIのissuesを見比べ、同じ問題を指しているもの(表現は違っても指している
 箇所・内容が同じもの)を「両方が指摘した問題」としてconfirmed_issuesにまとめ、
@@ -68,9 +62,7 @@ MERGE_SYSTEM = """あなたは、2つのAI(Claude・Gemini)が独立に行った
 - 100点: 完全に整合が取れている
 - 70〜99点: 軽微な表現のズレ程度（許容範囲内〜軽度の指摘）
 - 40〜69点: シーンの一部抜け落ちなど、視聴者が違和感を持ちうる問題がある
-- 0〜39点: シーンが丸ごと欠落している、話者が入れ替わっている、
-  VOICEVOX用テキストで話者の一人称が入れ替わっているなど致命的な
-  不整合がある
+- 0〜39点: シーンが丸ごと欠落しているなど致命的な不整合がある
 
 JSON形式のみを返してください:
 {
@@ -78,29 +70,27 @@ JSON形式のみを返してください:
   "confirmed_issues": ["<両方のAIが指摘した問題1>", ...],
   "single_source_issues": ["<一方のAIのみが指摘した問題1>", ...],
   "script_feedback": "<confirmed_issuesに基づき台本側で直すべき点。無ければ空文字>",
-  "slides_feedback": "<confirmed_issuesに基づきスライド側で直すべき点。無ければ空文字>",
-  "voicevox_feedback": "<confirmed_issuesに基づきVOICEVOXテキスト側で直すべき点。無ければ空文字>"
+  "slides_feedback": "<confirmed_issuesに基づきスライド側で直すべき点。無ければ空文字>"
 }
 """
 
 
-def _build_user(script: str, slides: list[dict], voicevox_text: str) -> str:
+def _build_user(script: str, slides: list[dict]) -> str:
     slides_text = json.dumps({"slides": slides}, ensure_ascii=False, indent=2)
     return (
         f"# 台本\n\n{script}\n\n"
         f"# スライド内容\n\n{slides_text}\n\n"
-        f"# VOICEVOX用読み上げテキスト\n\n{voicevox_text}\n\n"
-        "上記3つの整合性を確認してください。"
+        "上記2つの整合性を確認してください。"
     )
 
 
-def _check_claude(script: str, slides: list[dict], voicevox_text: str) -> dict:
-    user = _build_user(script, slides, voicevox_text)
+def _check_claude(script: str, slides: list[dict]) -> dict:
+    user = _build_user(script, slides)
     return call_json(CHECK_SYSTEM, user, model=MODEL_EVALUATE)
 
 
-def _check_gemini(script: str, slides: list[dict], voicevox_text: str) -> dict:
-    user = _build_user(script, slides, voicevox_text)
+def _check_gemini(script: str, slides: list[dict]) -> dict:
+    user = _build_user(script, slides)
     return gemini_client.call_json(CHECK_SYSTEM, user, model=MODEL_EVALUATE_GEMINI)
 
 
@@ -112,25 +102,26 @@ def _merge(claude_result: dict, gemini_result: dict) -> dict:
         f"{json.dumps(gemini_result, ensure_ascii=False, indent=2)}\n\n"
         "上記2つのAIによる独立したチェック結果を統合してください。"
     )
-    merged = call_json(MERGE_SYSTEM, user, model=MODEL_EVALUATE)
+    # 2つの結果の突き合わせ(同じ指摘かどうかの分類)だけなので軽量モデルで足りる
+    merged = call_json(MERGE_SYSTEM, user, model=MODEL_EXTRACT)
     merged["issues"] = merged.pop("confirmed_issues", [])
     return merged
 
 
-def check(script: str, slides: list[dict], voicevox_text: str) -> dict:
-    """台本・スライド・VOICEVOXテキストの整合性をチェックする。
+def check(script: str, slides: list[dict]) -> dict:
+    """台本とスライドの整合性をチェックする。
 
     返り値の"issues"は(Geminiクロスチェックが有効な場合)両方のAIが一致して
     指摘した問題のみ。片方のみの指摘は"single_source_issues"に入る
     (存在しない場合もある。呼び出し側は.get()で参照すること)。
     """
-    claude_result = _check_claude(script, slides, voicevox_text)
+    claude_result = _check_claude(script, slides)
 
     if not os.environ.get("GEMINI_API_KEY"):
         return claude_result
 
     try:
-        gemini_result = _check_gemini(script, slides, voicevox_text)
+        gemini_result = _check_gemini(script, slides)
     except Exception as exc:  # noqa: BLE001 Geminiの障害で品質ゲート自体を止めたくない
         print(
             f"  [{LABEL}] Geminiクロスチェックに失敗したためClaude単独の結果を使います: {exc}"
