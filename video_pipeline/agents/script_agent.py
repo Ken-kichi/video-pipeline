@@ -1,7 +1,12 @@
 """動画台本（ずんだもん×つむぎ形式）を生成・評価・修正するエージェント。"""
 
 from video_pipeline.claude_client import call_json, call_text
-from video_pipeline.config import MODEL_EVALUATE, MODEL_GENERATE
+from video_pipeline.config import (
+    EFFORT_EVALUATE,
+    EFFORT_GENERATE,
+    MODEL_EVALUATE,
+    MODEL_GENERATE,
+)
 from video_pipeline.loop import run_with_evaluation_loop
 
 LABEL = "台本エージェント"
@@ -351,14 +356,14 @@ REVISE_SYSTEM = """あなたは動画台本の修正担当です。渡された�
 def generate(article_text: str, mention_article: bool = True) -> str:
     system = GENERATE_SYSTEM + ARTICLE_MENTION_INSTRUCTION if mention_article else GENERATE_SYSTEM
     user = f"# 元記事\n\n{article_text}\n\n上記の記事から動画台本を作成してください。"
-    return call_text(system, user, model=MODEL_GENERATE)
+    return call_text(system, user, model=MODEL_GENERATE, effort=EFFORT_GENERATE)
 
 
 def evaluate(article_text: str, script: str, mention_article: bool = True) -> dict:
     criterion = f"{ARTICLE_MENTION_EVALUATE_CRITERION}\n" if mention_article else ""
     system = EVALUATE_SYSTEM + criterion + EVALUATE_SYSTEM_FOOTER
     user = f"# 元記事\n\n{article_text}\n\n# 台本\n\n{script}\n\n上記の台本を評価してください。"
-    return call_json(system, user, model=MODEL_EVALUATE)
+    return call_json(system, user, model=MODEL_EVALUATE, effort=EFFORT_EVALUATE)
 
 
 def revise(article_text: str, script: str, feedback: str) -> str:
@@ -366,7 +371,7 @@ def revise(article_text: str, script: str, feedback: str) -> str:
         f"# 元記事\n\n{article_text}\n\n# 現在の台本\n\n{script}\n\n"
         f"# フィードバック\n\n{feedback}\n\n上記フィードバックを反映して台本を修正してください。"
     )
-    return call_text(REVISE_SYSTEM, user, model=MODEL_GENERATE)
+    return call_text(REVISE_SYSTEM, user, model=MODEL_GENERATE, effort=EFFORT_GENERATE)
 
 
 def run(article_text: str, mention_article: bool = True) -> tuple[str, int, list[dict]]:

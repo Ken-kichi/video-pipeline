@@ -9,7 +9,7 @@
 """
 
 from video_pipeline.claude_client import call_json
-from video_pipeline.config import MODEL_GENERATE
+from video_pipeline.config import EFFORT_GENERATE, MODEL_GENERATE
 
 LABEL = "ショートエージェント"
 
@@ -42,5 +42,5 @@ def generate(script: str) -> dict:
     user = (
         f"# 動画台本\n\n{script}\n\n上記からショート用のフック文言を作成してください。"
     )
-    result = call_json(GENERATE_SYSTEM, user, model=MODEL_GENERATE)
+    result = call_json(GENERATE_SYSTEM, user, model=MODEL_GENERATE, effort=EFFORT_GENERATE)
     return {"hook_text": result.get("hook_text", "")}

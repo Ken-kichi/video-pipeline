@@ -34,7 +34,12 @@ def get_client() -> Anthropic:
 
 
 def _generate_with_truncation_retry(
-    system: str, user: str, model: str, max_tokens: int, max_attempts: int = 3
+    system: str,
+    user: str,
+    model: str,
+    max_tokens: int,
+    effort: str | None = None,
+    max_attempts: int = 3,
 ) -> str:
     """max_tokens到達による出力の途中切れを検知し、上限を増やして再生成する。
 
@@ -44,6 +49,9 @@ def _generate_with_truncation_retry(
     最初から生成し直す(部分的な継ぎ足しは行わない。JSON構造が壊れるため)。
     """
     current_max_tokens = max_tokens
+    # effortは思考の深さと全体のトークン消費を制御する(output_config内で指定する)。
+    # 未指定ならキーごと送らず、モデルのデフォルトに任せる
+    extra = {"output_config": {"effort": effort}} if effort else {}
     last_text = ""
     for attempt in range(max_attempts):
         with get_client().messages.stream(
@@ -51,6 +59,7 @@ def _generate_with_truncation_retry(
             max_tokens=current_max_tokens,
             system=system,
             messages=[{"role": "user", "content": user}],
+            **extra,
         ) as stream:
             response = stream.get_final_message()
         usage_tracker.record(model, response.usage)
@@ -75,13 +84,20 @@ def _generate_with_truncation_retry(
     return last_text
 
 
-def call_text(system: str, user: str, model: str, max_tokens: int = MAX_TOKENS) -> str:
+def call_text(
+    system: str,
+    user: str,
+    model: str,
+    max_tokens: int = MAX_TOKENS,
+    effort: str | None = None,
+) -> str:
     """Claudeにテキスト生成を依頼し、テキスト本文を返す。
 
     modelは呼び出し側(各エージェント)が役割に応じて明示的に指定する
     (config.MODEL_GENERATE / MODEL_EVALUATE / MODEL_EXTRACT のいずれか)。
+    effortも同様に、役割に対応するconfig.EFFORT_*を呼び出し側が渡す(Noneなら未指定)。
     """
-    return _generate_with_truncation_retry(system, user, model, max_tokens)
+    return _generate_with_truncation_retry(system, user, model, max_tokens, effort)
 
 
 def _strip_code_fence(text: str) -> str:
@@ -116,7 +132,12 @@ def _repair_score_feedback(text: str) -> dict | None:
 
 
 def call_json(
-    system: str, user: str, model: str, max_tokens: int = MAX_TOKENS, retries: int = 2
+    system: str,
+    user: str,
+    model: str,
+    max_tokens: int = MAX_TOKENS,
+    retries: int = 2,
+    effort: str | None = None,
 ) -> dict:
     """Claudeに『JSONのみ』を返すよう依頼し、パース済みdictを返す。
 
@@ -132,7 +153,9 @@ def call_json(
     current_user = user
     last_raw = ""
     for attempt in range(retries + 1):
-        raw = call_text(full_system, current_user, model=model, max_tokens=max_tokens)
+        raw = call_text(
+            full_system, current_user, model=model, max_tokens=max_tokens, effort=effort
+        )
         last_raw = raw
         cleaned = _strip_code_fence(raw)
         try:

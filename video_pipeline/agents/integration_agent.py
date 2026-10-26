@@ -22,7 +22,13 @@ import os
 
 from video_pipeline import gemini_client
 from video_pipeline.claude_client import call_json
-from video_pipeline.config import MODEL_EVALUATE, MODEL_EVALUATE_GEMINI, MODEL_EXTRACT
+from video_pipeline.config import (
+    EFFORT_EVALUATE,
+    EFFORT_EXTRACT,
+    MODEL_EVALUATE,
+    MODEL_EVALUATE_GEMINI,
+    MODEL_EXTRACT,
+)
 
 LABEL = "総合エージェント"
 
@@ -86,7 +92,7 @@ def _build_user(script: str, slides: list[dict]) -> str:
 
 def _check_claude(script: str, slides: list[dict]) -> dict:
     user = _build_user(script, slides)
-    return call_json(CHECK_SYSTEM, user, model=MODEL_EVALUATE)
+    return call_json(CHECK_SYSTEM, user, model=MODEL_EVALUATE, effort=EFFORT_EVALUATE)
 
 
 def _check_gemini(script: str, slides: list[dict]) -> dict:
@@ -103,7 +109,7 @@ def _merge(claude_result: dict, gemini_result: dict) -> dict:
         "上記2つのAIによる独立したチェック結果を統合してください。"
     )
     # 2つの結果の突き合わせ(同じ指摘かどうかの分類)だけなので軽量モデルで足りる
-    merged = call_json(MERGE_SYSTEM, user, model=MODEL_EXTRACT)
+    merged = call_json(MERGE_SYSTEM, user, model=MODEL_EXTRACT, effort=EFFORT_EXTRACT)
     merged["issues"] = merged.pop("confirmed_issues", [])
     return merged
 

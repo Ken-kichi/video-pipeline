@@ -535,13 +535,19 @@ video_pipeline/
 役割ごとにモデルを分けている。評価・整合性チェックは元々「品質のゲート役」として
 最も強いモデル(Opus)を割り当てていたが、5エージェント×最大3ループ分のコストが
 嵩む（Opusは2026年8月時点でSonnet 5の紹介価格の2.5倍）ため、コスト優先で
-さらに入力単価がSonnetの1/20のHaiku 5.5に変更した。評価が甘い・指摘が浅いと
-感じた場合は`CLAUDE_MODEL_EVALUATE=claude-sonnet-5`（または`claude-opus-4-8`）を設定すれば戻せる。
+その後Haiku 5.5も試したが、点数が約20点厳しく合否の分離も不安定で、通過点80のままだと
+修正ループが毎回上限まで回りコストが増えるため、評価はSonnetのままにしている
+（コストは下記のeffortで抑える）。
 
 - `MODEL_GENERATE`（環境変数 `CLAUDE_MODEL_GENERATE`）: 台本・スライドの生成/修正。デフォルト `claude-sonnet-5`
-- `MODEL_EVALUATE`（環境変数 `CLAUDE_MODEL_EVALUATE`）: 評価・整合性チェック。デフォルト `claude-haiku-5-5`
-  （品質を優先するなら `claude-sonnet-5` や `claude-opus-4-8` に変更）
+- `MODEL_EVALUATE`（環境変数 `CLAUDE_MODEL_EVALUATE`）: 評価・整合性チェック。デフォルト `claude-sonnet-5`
+  （品質を優先するなら `claude-opus-4-8` に変更）
 - `MODEL_EXTRACT`（環境変数 `CLAUDE_MODEL_EXTRACT`）: 総合チェックの2AI結果の統合・概要欄の評価など機械的な作業。デフォルト `claude-haiku-5-5`
+- `EFFORT_GENERATE`/`EFFORT_EVALUATE`/`EFFORT_EXTRACT`（環境変数 `CLAUDE_EFFORT_*`）: 役割ごとの思考量
+  （`low`/`medium`/`high`/`xhigh`/`max`。空ならAPIのデフォルト=`high`）。思考は出力トークンとして
+  課金され、Sonnet 5の評価では出力が評価コストの約2/3を占めていた。**評価のデフォルトは`medium`**
+  （台本評価の実験でhighと同等の検出力・分離幅。`low`は元台本まで低得点になり使えなかった）。
+  スライド評価・総合チェックにも適用されるが、こちらは実験していない
 - `MODEL_EVALUATE_GEMINI`（環境変数 `GEMINI_MODEL_EVALUATE`）: 総合エージェントのクロスチェックに使うGeminiモデル。
   デフォルト `gemini-3.1-pro-preview`（`GEMINI_API_KEY`が未設定の場合はそもそも使われない）
 - `MAX_INTEGRATION_LOOPS`（環境変数でも指定可）: 総合エージェントのチェック→修正ラウンドの最大回数（デフォルト2。

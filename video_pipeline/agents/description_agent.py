@@ -20,6 +20,8 @@
 from video_pipeline.claude_client import call_text, call_json
 from video_pipeline.config import (
     CHANNEL_URL,
+    EFFORT_EXTRACT,
+    EFFORT_GENERATE,
     MODEL_EXTRACT,
     MODEL_GENERATE,
     TSUMUGI_ILLUSTRATOR_CREDIT,
@@ -145,7 +147,7 @@ def generate(script: str, article_url: str, include_article_link: bool = True) -
     if include_article_link:
         user += f"# 元記事URL\n\n{article_url}\n\n"
     user += "上記から動画概要欄のテキストを作成してください。"
-    return call_text(system, user, model=MODEL_GENERATE)
+    return call_text(system, user, model=MODEL_GENERATE, effort=EFFORT_GENERATE)
 
 
 def evaluate(script: str, description: str, include_article_link: bool = True) -> dict:
@@ -158,7 +160,7 @@ def evaluate(script: str, description: str, include_article_link: bool = True) -
         "上記を評価してください。"
     )
     # 評価観点は目次の形式・時刻の一致など定型的なチェックが中心なので軽量モデルで足りる
-    return call_json(system, user, model=MODEL_EXTRACT)
+    return call_json(system, user, model=MODEL_EXTRACT, effort=EFFORT_EXTRACT)
 
 
 def revise(
@@ -174,7 +176,7 @@ def revise(
         f"# 動画台本\n\n{script}\n\n# 現在の概要欄テキスト\n\n{description}\n\n"
         f"# フィードバック\n\n{feedback}\n\n上記フィードバックを反映して修正してください。"
     )
-    return call_text(system, user, model=MODEL_GENERATE)
+    return call_text(system, user, model=MODEL_GENERATE, effort=EFFORT_GENERATE)
 
 
 def run(

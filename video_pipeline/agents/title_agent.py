@@ -8,7 +8,7 @@
 """
 
 from video_pipeline.claude_client import call_text
-from video_pipeline.config import MODEL_GENERATE
+from video_pipeline.config import EFFORT_GENERATE, MODEL_GENERATE
 
 LABEL = "タイトルエージェント"
 
@@ -61,5 +61,5 @@ GENERATE_SYSTEM = """あなたはYouTube動画のタイトルを考えるコピ�
 def generate(script: str) -> str:
     """台本からYouTubeタイトルを生成する。"""
     user = f"# 動画台本\n\n{script}\n\n上記からYouTubeタイトルを1つ作成してください。"
-    title = call_text(GENERATE_SYSTEM, user, model=MODEL_GENERATE)
+    title = call_text(GENERATE_SYSTEM, user, model=MODEL_GENERATE, effort=EFFORT_GENERATE)
     return title.strip().strip("「」\"'")

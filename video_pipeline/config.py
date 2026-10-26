@@ -14,13 +14,30 @@ load_dotenv()
 #
 # - GENERATE: 台本・スライドなど、創造性と一貫性が必要な生成/修正作業
 # - EVALUATE: スコアリング・整合性チェックなど、ループの品質保証を担う"審査員"役
-#             入力(記事+台本)が重い呼び出しなので、入力単価がSonnetの1/20の
-#             Haiku 5.5にしている。評価が甘い・指摘が浅いと感じた場合は、
-#             環境変数CLAUDE_MODEL_EVALUATEでclaude-sonnet-5等に戻せる
+#             Haiku 5.5でも欠陥の検出と指摘の質は同等だったが、点数がSonnetより
+#             約20点厳しく合否の分離も不安定で(実験: 欠陥を注入した台本の評価)、
+#             通過点80のままだと修正ループが毎回上限まで回りコストが逆に増えるため、
+#             台本などの評価はSonnetにしている。コストは次のEFFORTで抑える
 # - EXTRACT:  VOICEVOX用テキスト抽出など、フォーマットに沿って機械的に整形するだけの作業
 MODEL_GENERATE = os.environ.get("CLAUDE_MODEL_GENERATE", "claude-sonnet-5")
-MODEL_EVALUATE = os.environ.get("CLAUDE_MODEL_EVALUATE", "claude-haiku-5-5")
+MODEL_EVALUATE = os.environ.get("CLAUDE_MODEL_EVALUATE", "claude-sonnet-5")
 MODEL_EXTRACT = os.environ.get("CLAUDE_MODEL_EXTRACT", "claude-haiku-5-5")
+
+# 役割ごとの思考量(effort: low/medium/high/xhigh/max)。思考は出力トークンとして
+# 課金され、Sonnet 5の評価では1回あたり出力約8,000トークンが評価コストの約2/3を
+# 占めていた(未指定時のデフォルトはhigh)。空・未設定ならAPIのデフォルトに任せる。
+# 環境変数 CLAUDE_EFFORT_GENERATE/EVALUATE/EXTRACT で指定する(空文字を指定すると
+# 未指定扱いになり、APIのデフォルトに戻る)。
+#
+# EVALUATEのデフォルトはmedium。台本評価の実験(実在台本2本×正常/欠陥3種、Sonnet 5)で、
+#   - medium: highと同等(欠陥検出6/6、元台本の点が3点低い程度、合否の分離幅は
+#             highの9点に対して10点)。出力トークンは大きく減り、所要時間は約半分
+#   - low:    元台本まで48〜62点に落ち、欠陥入りとの分離幅が0点で評価として使えない
+# だったため。スライド評価・総合チェックにも同じ値が適用される(こちらは未検証)。
+# GENERATE/EXTRACTは品質への影響を確認していないため、デフォルトは未指定のまま
+EFFORT_GENERATE = os.environ.get("CLAUDE_EFFORT_GENERATE") or None
+EFFORT_EVALUATE = os.environ.get("CLAUDE_EFFORT_EVALUATE", "medium") or None
+EFFORT_EXTRACT = os.environ.get("CLAUDE_EFFORT_EXTRACT") or None
 
 # 総合エージェントのクロスチェックに使うGemini側の評価モデル。Claudeとは別会社の
 # モデルに同じ観点でチェックさせ、単一モデルが見落としがちな不整合を拾う狙い。

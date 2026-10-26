@@ -12,7 +12,7 @@ visual_summaryとして動画の核心的な内容を要約し、Geminiが自律
 """
 
 from video_pipeline.claude_client import call_json
-from video_pipeline.config import MODEL_GENERATE
+from video_pipeline.config import EFFORT_GENERATE, MODEL_GENERATE
 
 LABEL = "サムネイルエージェント"
 
@@ -93,7 +93,7 @@ def generate(script: str, video_title: str | None = None) -> dict:
             "補強する形が望ましいです。\n\n"
         )
     user += "上記からサムネイル用の文言と図解材料(visual_summary)を作成してください。"
-    result = call_json(GENERATE_SYSTEM, user, model=MODEL_GENERATE)
+    result = call_json(GENERATE_SYSTEM, user, model=MODEL_GENERATE, effort=EFFORT_GENERATE)
     return {
         "main_text": result.get("main_text", ""),
         "sub_text": result.get("sub_text", ""),

@@ -22,7 +22,12 @@
 import json
 
 from video_pipeline.claude_client import call_json
-from video_pipeline.config import MODEL_EVALUATE, MODEL_GENERATE
+from video_pipeline.config import (
+    EFFORT_EVALUATE,
+    EFFORT_GENERATE,
+    MODEL_EVALUATE,
+    MODEL_GENERATE,
+)
 from video_pipeline.loop import run_with_evaluation_loop
 
 LABEL = "スライドエージェント"
@@ -209,7 +214,7 @@ def generate(article_text: str, script: str, asset_summary: str = "") -> list[di
         f"# 元記事\n\n{article_text}\n\n# 動画台本\n\n{script}\n{asset_block}\n"
         "上記をもとにスライド内容を作成してください。"
     )
-    result = call_json(GENERATE_SYSTEM, user, model=MODEL_GENERATE)
+    result = call_json(GENERATE_SYSTEM, user, model=MODEL_GENERATE, effort=EFFORT_GENERATE)
     return result["slides"]
 
 
@@ -221,7 +226,7 @@ def evaluate(
         f"# 元記事\n\n{article_text}\n\n# 動画台本\n\n{script}\n{asset_block}\n"
         f"# 現在のスライド内容\n\n{_slides_to_text(slides)}\n\n上記を評価してください。"
     )
-    return call_json(EVALUATE_SYSTEM, user, model=MODEL_EVALUATE)
+    return call_json(EVALUATE_SYSTEM, user, model=MODEL_EVALUATE, effort=EFFORT_EVALUATE)
 
 
 def revise(
@@ -232,7 +237,7 @@ def revise(
         f"# 動画台本\n\n{script}\n{asset_block}\n# 現在のスライド内容\n\n{_slides_to_text(slides)}\n\n"
         f"# フィードバック\n\n{feedback}\n\n上記フィードバックを反映してスライド内容を修正してください。"
     )
-    result = call_json(REVISE_SYSTEM, user, model=MODEL_GENERATE)
+    result = call_json(REVISE_SYSTEM, user, model=MODEL_GENERATE, effort=EFFORT_GENERATE)
     return result["slides"]
 
 
