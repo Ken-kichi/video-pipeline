@@ -225,6 +225,10 @@ def _resolve_media_slides(
                 block.header, block.rows, media_dir / f"table_{i + 1}.png"
             )
             slide_data["table_image_path"] = str(path)
+            # slide_image_builderが最終的な表示サイズに合わせて表を描き直せるよう、
+            # 表の中身も残しておく(画像を縮小するだけでは文字が小さくなりすぎる)
+            slide_data["table_header"] = list(block.header)
+            slide_data["table_rows"] = [list(r) for r in block.rows]
 
         elif layout == "image":
             ref = slide_data.get("image_ref")

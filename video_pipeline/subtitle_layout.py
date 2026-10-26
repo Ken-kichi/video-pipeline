@@ -7,6 +7,7 @@ code/imageスライド下部に字幕用の余白をどれだけ確保するか�
 折り返し幅・フォント・行数の計算方法を1箇所に集約している。
 """
 
+import re
 from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont
@@ -26,6 +27,11 @@ SUBTITLE_MAX_WIDTH = VIDEO_WIDTH - SUBTITLE_MARGIN_L - SUBTITLE_MARGIN_R
 # 字幕1行あたりの実効高さ(px)の見積もり。SUBTITLE_FONT_SIZE=64のとき、
 # 行間・行送りを含めておおよそこの高さになる(libassの実際の描画結果から逆算)。
 SUBTITLE_LINE_HEIGHT_PX = 100
+# 1つの字幕イベントに表示する最大行数。これを超える長いセリフは、複数の字幕に
+# 分けて順番に表示する(split_subtitle_chunks参照)。長いセリフを1つの字幕として
+# 一度に出すと、5〜6行(500px以上)の字幕がスライドの図や表を覆い、スライド側も
+# その最悪ケースに合わせて図を縮小するため、図が小さくなりすぎる不具合があった。
+SUBTITLE_MAX_LINES = 2
 
 _subtitle_measure_font: ImageFont.FreeTypeFont | None = None
 
@@ -66,14 +72,77 @@ def wrap_subtitle_text(text: str, max_width: int = SUBTITLE_MAX_WIDTH) -> str:
     return "\\N".join(lines) if lines else text
 
 
-def count_subtitle_lines(text: str, max_width: int = SUBTITLE_MAX_WIDTH) -> int:
-    """このテキストが実際に字幕として焼き込まれた際の行数を返す。
+_SENTENCE_END_RE = re.compile(r"(?<=[。！？!?])")
+_CLAUSE_END_RE = re.compile(r"(?<=[、，,])")
 
-    _build_ass_subtitleが焼き込み前に行っているのと同じクリーニング
-    (改行・ASSの制御文字として解釈される{}の除去)を適用してから折り返し行数を数える。
+
+def _clean_subtitle_text(text: str) -> str:
+    """字幕として焼き込む前のクリーニング(改行・ASS制御文字{}の除去)。"""
+    return text.replace("\n", " ").replace("{", "").replace("}", "")
+
+
+def _wrapped_line_count(text: str, max_width: int) -> int:
+    return wrap_subtitle_text(text, max_width).count("\\N") + 1
+
+
+def _hard_split(text: str, max_lines: int, max_width: int) -> list[str]:
+    """句読点で分けても収まらない長い塊を、折り返し行数の単位で機械的に分割する。"""
+    wrapped_lines = wrap_subtitle_text(text, max_width).split("\\N")
+    return [
+        "".join(wrapped_lines[i : i + max_lines])
+        for i in range(0, len(wrapped_lines), max_lines)
+    ]
+
+
+def split_subtitle_chunks(
+    text: str,
+    max_lines: int = SUBTITLE_MAX_LINES,
+    max_width: int = SUBTITLE_MAX_WIDTH,
+) -> list[str]:
+    """長いセリフを、max_lines行に収まる字幕の列に分割する。
+
+    文末(。！？)で区切り、1文がmax_lines行を超える場合は読点(、)で、それでも
+    収まらなければ折り返し行の単位で分割する。区切った塊は、max_lines行に収まる
+    範囲でなるべくまとめて詰める(字幕の切り替わりを必要以上に増やさない)。
+    """
+    cleaned = _clean_subtitle_text(text).strip()
+    if not cleaned:
+        return [text]
+
+    units: list[str] = []
+    for sentence in filter(None, _SENTENCE_END_RE.split(cleaned)):
+        if _wrapped_line_count(sentence, max_width) <= max_lines:
+            units.append(sentence)
+            continue
+        for clause in filter(None, _CLAUSE_END_RE.split(sentence)):
+            if _wrapped_line_count(clause, max_width) <= max_lines:
+                units.append(clause)
+            else:
+                units.extend(_hard_split(clause, max_lines, max_width))
+
+    chunks: list[str] = []
+    current = ""
+    for unit in units:
+        trial = current + unit
+        if current and _wrapped_line_count(trial, max_width) > max_lines:
+            chunks.append(current)
+            current = unit
+        else:
+            current = trial
+    if current:
+        chunks.append(current)
+    return chunks
+
+
+def count_subtitle_lines(text: str, max_width: int = SUBTITLE_MAX_WIDTH) -> int:
+    """このテキストが実際に字幕として焼き込まれた際の最大行数を返す。
+
+    長いセリフはsplit_subtitle_chunksで複数の字幕に分けて表示されるため、
+    同時に画面に出る行数は分割後の各字幕の最大値(通常はSUBTITLE_MAX_LINES以下)。
     """
     if not text:
         return 1
-    cleaned = text.replace("\n", " ").replace("{", "").replace("}", "")
-    wrapped = wrap_subtitle_text(cleaned, max_width)
-    return wrapped.count("\\N") + 1
+    return max(
+        _wrapped_line_count(chunk, max_width)
+        for chunk in split_subtitle_chunks(text, max_width=max_width)
+    )

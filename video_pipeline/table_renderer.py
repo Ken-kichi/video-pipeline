@@ -59,6 +59,8 @@ def _column_widths(
     header_font: ImageFont.FreeTypeFont,
     body_font: ImageFont.FreeTypeFont,
     target_total_width: int,
+    padding_x: int = CELL_PADDING_X,
+    stretch: bool = True,
 ) -> list[int]:
     """列内容に応じた比率で、指定した合計幅に収まる列幅を決める。
 
@@ -77,29 +79,41 @@ def _column_widths(
         font = header_font if row_index == 0 else body_font
         for col_index in range(col_count):
             cell = row[col_index] if col_index < len(row) else ""
-            width = font.getlength(str(cell)) + CELL_PADDING_X * 2
+            width = font.getlength(str(cell)) + padding_x * 2
             preferred[col_index] = max(
                 preferred[col_index], min(width, MAX_COL_WIDTH)
             )
 
     total_preferred = sum(preferred)
+    if not stretch and total_preferred <= target_total_width:
+        # 内容が狭い表を無理に引き伸ばさず、自然な幅のまま返す
+        return [max(1, int(w)) for w in preferred]
     scale = target_total_width / total_preferred
     return [max(1, int(w * scale)) for w in preferred]
 
 
-def render_table_image(
+def render_table_pil(
     header: list[str],
     rows: list[list[str]],
-    output_path: str | Path,
+    font_size: int = TABLE_FONT_SIZE,
     max_width: int = 1600,
-) -> Path:
-    """表の見出し行・データ行をPNG画像として書き出す。"""
-    header_font = _load_font(TABLE_FONT_SIZE, weight=700)
-    body_font = _load_font(TABLE_FONT_SIZE, weight=400)
-    line_height = int(TABLE_FONT_SIZE * TABLE_LINE_SPACING)
+    stretch: bool = True,
+) -> Image.Image:
+    """表の見出し行・データ行を、指定フォントサイズでPIL画像として描画する。
+
+    余白・行間はfont_sizeに比例させる(TABLE_FONT_SIZE基準の値を拡縮)。
+    stretch=Falseなら、内容が狭い表をmax_widthまで引き伸ばさない。
+    """
+    header_font = _load_font(font_size, weight=700)
+    body_font = _load_font(font_size, weight=400)
+    line_height = int(font_size * TABLE_LINE_SPACING)
+    padding_x = max(8, round(font_size * CELL_PADDING_X / TABLE_FONT_SIZE))
+    padding_y = max(6, round(font_size * CELL_PADDING_Y / TABLE_FONT_SIZE))
 
     all_rows = [header] + rows
-    col_widths = _column_widths(all_rows, header_font, body_font, max_width)
+    col_widths = _column_widths(
+        all_rows, header_font, body_font, max_width, padding_x, stretch
+    )
     total_width = sum(col_widths)
 
     wrapped_rows: list[list[list[str]]] = []
@@ -110,13 +124,11 @@ def render_table_image(
         max_lines = 1
         for col_index, col_width in enumerate(col_widths):
             cell = row[col_index] if col_index < len(row) else ""
-            cell_lines = _wrap_cell_text(
-                str(cell), font, col_width - CELL_PADDING_X * 2
-            )
+            cell_lines = _wrap_cell_text(str(cell), font, col_width - padding_x * 2)
             wrapped_cells.append(cell_lines)
             max_lines = max(max_lines, len(cell_lines))
         wrapped_rows.append(wrapped_cells)
-        row_heights.append(max_lines * line_height + CELL_PADDING_Y * 2)
+        row_heights.append(max_lines * line_height + padding_y * 2)
 
     total_height = sum(row_heights)
     img = Image.new("RGB", (total_width, total_height), "#FFFFFF")
@@ -143,13 +155,53 @@ def render_table_image(
                 outline=BORDER_COLOR,
                 width=1,
             )
-            text_y = y + CELL_PADDING_Y
+            text_y = y + padding_y
             for line in cell_lines:
-                draw.text((x + CELL_PADDING_X, text_y), line, font=font, fill=text_color)
+                draw.text((x + padding_x, text_y), line, font=font, fill=text_color)
                 text_y += line_height
             x += col_width
         y += row_height
 
+    return img
+
+
+def fit_table_pil(
+    header: list[str],
+    rows: list[list[str]],
+    max_width: int,
+    max_height: int,
+    max_font_size: int = 44,
+    min_font_size: int = 22,
+) -> Image.Image:
+    """max_width x max_heightの枠に収まる範囲で、最も大きいフォントで表を描画する。
+
+    以前は固定のフォントサイズで広い画像に描画してから枠に合わせて縮小して
+    いたため、行数の多い表では実効のフォントが20px前後まで小さくなり、動画で
+    読めなかった。ここでは最終的な表示サイズに合わせて、大きいフォントから順に
+    描画し直し、枠の高さに収まる最大のフォントサイズを選ぶ。最小フォントでも
+    収まらない場合のみ、最後に縮小して枠へ収める。
+    """
+    img = None
+    for font_size in range(max_font_size, min_font_size - 1, -2):
+        img = render_table_pil(header, rows, font_size, max_width, stretch=False)
+        if img.height <= max_height and img.width <= max_width:
+            return img
+    assert img is not None
+    scale = min(max_width / img.width, max_height / img.height, 1.0)
+    return img.resize(
+        (max(1, round(img.width * scale)), max(1, round(img.height * scale))),
+        Image.LANCZOS,
+    )
+
+
+def render_table_image(
+    header: list[str],
+    rows: list[list[str]],
+    output_path: str | Path,
+    max_width: int = 1600,
+) -> Path:
+    """表の見出し行・データ行をPNG画像として書き出す。"""
+    img = render_table_pil(header, rows, TABLE_FONT_SIZE, max_width)
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     img.save(output_path)

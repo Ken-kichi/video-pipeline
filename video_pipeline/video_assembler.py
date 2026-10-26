@@ -48,6 +48,7 @@ from video_pipeline.subtitle_layout import (
     SUBTITLE_MARGIN_R,
     SUBTITLE_MARGIN_V,
     SUBTITLE_MAX_WIDTH,
+    split_subtitle_chunks,
     wrap_subtitle_text,
 )
 from video_pipeline.voicevox_client import (
@@ -519,11 +520,22 @@ def _build_ass_subtitle(timeline: list[TimedLine], output_path: str | Path) -> P
         style_name = (
             item.speaker if item.speaker in SUBTITLE_STYLE_COLORS else "Default"
         )
-        start = _format_ass_time(item.start)
-        end = _format_ass_time(item.end)
-        cleaned = item.text.replace("\n", " ").replace("{", "").replace("}", "")
-        text = wrap_subtitle_text(cleaned)
-        events.append(f"Dialogue: 0,{start},{end},{style_name},,0,0,0,,{text}")
+        # 長いセリフは複数の字幕に分け、文字数に比例して発話区間を割り振る
+        # (一度に出す字幕を最大SUBTITLE_MAX_LINES行に抑え、スライドの図表を覆わない)
+        chunks = split_subtitle_chunks(item.text)
+        total_chars = sum(len(c) for c in chunks) or 1
+        cursor = item.start
+        for index, chunk in enumerate(chunks):
+            if index == len(chunks) - 1:
+                chunk_end = item.end
+            else:
+                chunk_end = cursor + (item.end - item.start) * len(chunk) / total_chars
+            text = wrap_subtitle_text(chunk)
+            events.append(
+                f"Dialogue: 0,{_format_ass_time(cursor)},{_format_ass_time(chunk_end)},"
+                f"{style_name},,0,0,0,,{text}"
+            )
+            cursor = chunk_end
 
     output_path = Path(output_path)
     output_path.write_text(header + "\n".join(events) + "\n", encoding="utf-8")

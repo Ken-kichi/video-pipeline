@@ -91,6 +91,28 @@ def _strip_code_fence(text: str) -> str:
     return text
 
 
+_SCORE_FEEDBACK_RE = re.compile(
+    r'^\s*\{\s*"score"\s*:\s*(-?\d+)\s*,\s*"feedback"\s*:\s*"(.*)"\s*\}\s*$',
+    flags=re.DOTALL,
+)
+
+
+def _repair_score_feedback(text: str) -> dict | None:
+    """評価エージェントの {"score": N, "feedback": "..."} 形式の救済パース。
+
+    feedback本文に「そう/その通り」のようなエスケープされていないASCIIの
+    二重引用符が混ざると、JSONとして不正になる(評価フィードバックは台本の
+    セリフを引用することが多く、起こりやすい)。この形式に限って、score(整数)と
+    feedback(最初の"feedback":"〜最後の"}まで)を正規表現で取り出す。
+    形式に合わなければNoneを返し、呼び出し側が通常の再試行に進む。
+    """
+    match = _SCORE_FEEDBACK_RE.match(text)
+    if match is None:
+        return None
+    feedback = match.group(2).replace("\\n", "\n").replace('\\"', '"')
+    return {"score": int(match.group(1)), "feedback": feedback}
+
+
 def call_json(
     system: str, user: str, model: str, max_tokens: int = MAX_TOKENS, retries: int = 2
 ) -> dict:
@@ -121,6 +143,10 @@ def call_json(
                 )
             return parsed
         except json.JSONDecodeError:
+            repaired = _repair_score_feedback(cleaned)
+            if repaired is not None:
+                print("  [警告] 評価JSONが不正だったため、score/feedbackを抽出して救済しました")
+                return repaired
             if attempt == retries:
                 break
             current_user = (

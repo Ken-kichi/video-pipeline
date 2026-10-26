@@ -29,6 +29,7 @@ import json
 from PIL import Image, ImageDraw, ImageFont
 
 from video_pipeline.script_parser import flatten_lines, parse_script
+from video_pipeline.table_renderer import fit_table_pil
 from video_pipeline.subtitle_layout import (
     SUBTITLE_MARGIN_V,
     SUBTITLE_LINE_HEIGHT_PX,
@@ -66,7 +67,16 @@ LINE_SPACING = 1.4
 MIN_MEDIA_CONTENT_HEIGHT = 200
 
 
-def _media_bottom_reserved_space(subtitle_max_lines: int | None = None) -> int:
+# 立ち絵(画面の左右下)に挟まれた、中央の空き幅(px)。画像がこの幅に収まるなら
+# 立ち絵と重ならないので、下部の余白は字幕ぶんだけで足りる(立ち絵ぶんの余白を
+# 取らずに済み、図・表を大きく表示できる)。立ち絵は左端〜約370px、右端
+# 約1560px〜に表示される(video_assemblerのオーバーレイ位置)ため、余裕を見て設定。
+CENTER_FREE_WIDTH = 1100
+
+
+def _media_bottom_reserved_space(
+    subtitle_max_lines: int | None = None, include_character: bool = True
+) -> int:
     """字幕・キャラクター立ち絵と重ならないために確保すべき下部余白を返す。
 
     subtitle_max_linesには、このスライドが表示されている間に流れうる
@@ -83,6 +93,9 @@ def _media_bottom_reserved_space(subtitle_max_lines: int | None = None) -> int:
         reserved = DEFAULT_SUBTITLE_RESERVED_SPACE
     else:
         reserved = SUBTITLE_MARGIN_V + max(1, subtitle_max_lines) * SUBTITLE_LINE_HEIGHT_PX
+
+    if not include_character:
+        return reserved
 
     has_character_assets = CHARACTER_ASSETS_DIR.exists() and any(
         CHARACTER_ASSETS_DIR.glob("*_open.png")
@@ -439,6 +452,64 @@ def _render_comparison(
             y += 14
 
 
+def _make_media(
+    slide_data: dict, image_path_key: str, image_path: str, max_w: int, max_h: int
+) -> Image.Image:
+    """枠(max_w x max_h)に収まるメディア画像を作る。表は枠に合わせて描き直す。"""
+    if image_path_key == "table_image_path" and slide_data.get("table_header"):
+        return fit_table_pil(
+            slide_data["table_header"], slide_data.get("table_rows", []), max_w, max_h
+        )
+    return _fit_image(image_path, max_w, max_h)
+
+
+def _fit_media(
+    slide_data: dict,
+    image_path_key: str,
+    image_path: str,
+    y: int,
+    caption_height: int,
+    subtitle_max_lines: int | None,
+) -> tuple[Image.Image, int]:
+    """図・表・画像を置く枠を2通り試し、大きく表示できる方を採用する。
+
+    A) 左右いっぱい+下部は字幕と立ち絵の両方を避ける(従来)
+    B) 立ち絵に挟まれた中央幅(CENTER_FREE_WIDTH)+下部は字幕だけ避ける
+    Bは横長でない図・表で、立ち絵ぶんの縦の余白を使えるぶん大きくなる。
+    戻り値は(メディア画像, 採用した枠の高さ)。枠の高さは縦方向の中央寄せに使う。
+    """
+    full_w = SLIDE_WIDTH - MARGIN * 2
+    candidates = [
+        (
+            full_w,
+            max(
+                MIN_MEDIA_CONTENT_HEIGHT,
+                SLIDE_HEIGHT
+                - y
+                - _media_bottom_reserved_space(subtitle_max_lines)
+                - caption_height,
+            ),
+        ),
+        (
+            min(full_w, CENTER_FREE_WIDTH),
+            max(
+                MIN_MEDIA_CONTENT_HEIGHT,
+                SLIDE_HEIGHT
+                - y
+                - _media_bottom_reserved_space(subtitle_max_lines, include_character=False)
+                - caption_height,
+            ),
+        ),
+    ]
+    best: tuple[Image.Image, int] | None = None
+    for max_w, max_h in candidates:
+        media = _make_media(slide_data, image_path_key, image_path, max_w, max_h)
+        if best is None or media.width * media.height > best[0].width * best[0].height:
+            best = (media, max_h)
+    assert best is not None
+    return best
+
+
 def _render_media_layout(
     img: Image.Image,
     draw: ImageDraw.ImageDraw,
@@ -473,14 +544,12 @@ def _render_media_layout(
 
     image_path = slide_data.get(image_path_key)
     media = None
+    max_h = MIN_MEDIA_CONTENT_HEIGHT
     if image_path and Path(image_path).exists():
         try:
-            max_w = SLIDE_WIDTH - MARGIN * 2
-            reserved = _media_bottom_reserved_space(subtitle_max_lines)
-            max_h = max(
-                MIN_MEDIA_CONTENT_HEIGHT, SLIDE_HEIGHT - y - reserved - caption_height
+            media, max_h = _fit_media(
+                slide_data, image_path_key, image_path, y, caption_height, subtitle_max_lines
             )
-            media = _fit_image(image_path, max_w, max_h)
         except Exception as exc:  # noqa: BLE001 画像が壊れていてもスライド生成全体は止めない
             print(f"  [警告] 画像の読み込みに失敗しました({image_path}): {exc}")
             media = None
