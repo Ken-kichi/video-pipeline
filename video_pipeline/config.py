@@ -2,6 +2,14 @@
 
 import os
 
+from dotenv import load_dotenv
+
+# 以下の設定値はimport時にos.environから読み込まれる。各CLIのmain()でload_dotenv()
+# を呼んでも、それより前にconfigがimportされているため.envの値が反映されなかった
+# (CLAUDE_MODEL_*等を.envに書いても無視されていた)。そのためここで先に読み込む。
+# 既にシェルで設定されている環境変数は上書きしない(load_dotenvの標準動作)。
+load_dotenv()
+
 # 役割ごとにモデルを分ける。全て環境変数で上書き可能。
 #
 # - GENERATE: 台本・スライドなど、創造性と一貫性が必要な生成/修正作業

@@ -10,6 +10,7 @@ import re
 
 from anthropic import Anthropic
 
+from video_pipeline import usage_tracker
 from video_pipeline.config import MAX_TOKENS
 
 _client: Anthropic | None = None
@@ -52,6 +53,7 @@ def _generate_with_truncation_retry(
             messages=[{"role": "user", "content": user}],
         ) as stream:
             response = stream.get_final_message()
+        usage_tracker.record(model, response.usage)
         text = "".join(block.text for block in response.content if block.type == "text")
         last_text = text
         if response.stop_reason != "max_tokens":

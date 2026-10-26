@@ -36,6 +36,7 @@ from video_pipeline.agents import (
     slides_agent,
     title_agent,
 )
+from video_pipeline import usage_tracker
 from video_pipeline.article_assets import extract_article_assets, summarize_for_prompt
 from video_pipeline.code_renderer import render_code_image
 from video_pipeline.config import (
@@ -259,6 +260,7 @@ def run_pipeline(
     mention_article: bool | None = None,
     pregenerated_script: str | None = None,
 ) -> dict:
+    usage_tracker.reset()
     article_text = read_markdown(article_path)
     article_url = article_url or DEFAULT_ARTICLE_URL_PLACEHOLDER
     generate_images = (
@@ -336,6 +338,8 @@ def run_pipeline(
         video_title, slides, output_dir_path / "slides", script_text=script
     )
 
+    usage_path = usage_tracker.save(output_dir_path / "claude_usage.json")
+
     print("\n=== 完了 ===")
     print(f"出力先ディレクトリ: {output_dir_path}")
     print(
@@ -349,6 +353,8 @@ def run_pipeline(
     print(f"スライド画像 : {output_dir_path / 'slides'}/ ({len(slide_image_paths)}枚)")
     print(f"概要欄       : {description_path}")
     print(f"サムネイルが欲しい場合は: uv run generate-thumbnail")
+    print(f"\n{usage_tracker.format_summary()}")
+    print(f"  (詳細: {usage_path})")
 
     return {
         "output_dir": output_dir_path,
