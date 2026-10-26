@@ -535,13 +535,13 @@ video_pipeline/
 役割ごとにモデルを分けている。評価・整合性チェックは元々「品質のゲート役」として
 最も強いモデル(Opus)を割り当てていたが、5エージェント×最大3ループ分のコストが
 嵩む（Opusは2026年8月時点でSonnet 5の紹介価格の2.5倍）ため、コスト優先で
-デフォルトをSonnetに変更した。評価の質を優先したい場合は
-`CLAUDE_MODEL_EVALUATE=claude-opus-4-8` を設定すれば元に戻せる。
+さらに入力単価がSonnetの1/20のHaiku 5.5に変更した。評価が甘い・指摘が浅いと
+感じた場合は`CLAUDE_MODEL_EVALUATE=claude-sonnet-5`（または`claude-opus-4-8`）を設定すれば戻せる。
 
 - `MODEL_GENERATE`（環境変数 `CLAUDE_MODEL_GENERATE`）: 台本・スライドの生成/修正。デフォルト `claude-sonnet-5`
-- `MODEL_EVALUATE`（環境変数 `CLAUDE_MODEL_EVALUATE`）: 評価・整合性チェック。デフォルト `claude-sonnet-5`
-  （品質を優先するなら `claude-opus-4-8` に変更。コストは約2.5倍になる）
-- `MODEL_EXTRACT`（環境変数 `CLAUDE_MODEL_EXTRACT`）: 総合チェックの2AI結果の統合・概要欄の評価など機械的な作業。デフォルト `claude-haiku-4-5-20251001`
+- `MODEL_EVALUATE`（環境変数 `CLAUDE_MODEL_EVALUATE`）: 評価・整合性チェック。デフォルト `claude-haiku-5-5`
+  （品質を優先するなら `claude-sonnet-5` や `claude-opus-4-8` に変更）
+- `MODEL_EXTRACT`（環境変数 `CLAUDE_MODEL_EXTRACT`）: 総合チェックの2AI結果の統合・概要欄の評価など機械的な作業。デフォルト `claude-haiku-5-5`
 - `MODEL_EVALUATE_GEMINI`（環境変数 `GEMINI_MODEL_EVALUATE`）: 総合エージェントのクロスチェックに使うGeminiモデル。
   デフォルト `gemini-3.1-pro-preview`（`GEMINI_API_KEY`が未設定の場合はそもそも使われない）
 - `MAX_INTEGRATION_LOOPS`（環境変数でも指定可）: 総合エージェントのチェック→修正ラウンドの最大回数（デフォルト2。

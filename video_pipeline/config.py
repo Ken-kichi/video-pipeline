@@ -14,14 +14,13 @@ load_dotenv()
 #
 # - GENERATE: 台本・スライドなど、創造性と一貫性が必要な生成/修正作業
 # - EVALUATE: スコアリング・整合性チェックなど、ループの品質保証を担う"審査員"役
-#             以前はOpusを割り当てていたが、5エージェント×最大3ループ分の
-#             評価コストが嵩む（Opusは現在のSonnet紹介価格の2.5倍）ため、
-#             コスト節約のためSonnetに変更した。品質が物足りない場合は
-#             環境変数CLAUDE_MODEL_EVALUATEでclaude-opus-4-8に戻せる
+#             入力(記事+台本)が重い呼び出しなので、入力単価がSonnetの1/20の
+#             Haiku 5.5にしている。評価が甘い・指摘が浅いと感じた場合は、
+#             環境変数CLAUDE_MODEL_EVALUATEでclaude-sonnet-5等に戻せる
 # - EXTRACT:  VOICEVOX用テキスト抽出など、フォーマットに沿って機械的に整形するだけの作業
 MODEL_GENERATE = os.environ.get("CLAUDE_MODEL_GENERATE", "claude-sonnet-5")
-MODEL_EVALUATE = os.environ.get("CLAUDE_MODEL_EVALUATE", "claude-sonnet-5")
-MODEL_EXTRACT = os.environ.get("CLAUDE_MODEL_EXTRACT", "claude-haiku-4-5-20251001")
+MODEL_EVALUATE = os.environ.get("CLAUDE_MODEL_EVALUATE", "claude-haiku-5-5")
+MODEL_EXTRACT = os.environ.get("CLAUDE_MODEL_EXTRACT", "claude-haiku-5-5")
 
 # 総合エージェントのクロスチェックに使うGemini側の評価モデル。Claudeとは別会社の
 # モデルに同じ観点でチェックさせ、単一モデルが見落としがちな不整合を拾う狙い。
